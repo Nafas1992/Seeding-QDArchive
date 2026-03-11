@@ -3,7 +3,7 @@
 This project implements the first phase of the QDArchive data pipeline, focusing on automated repository probing and metadata logging.
 
 ## 🎯 Final Task Assignment
-Based on the provided assignment table and the **Qualitative Data Repositories.xlsx** reference, the following sources were processed for **ActiveID 123542421**:
+Based on the provided assignment table and the **Qualitative Data Repositories.xlsx** reference, the following sources were processed for **ActiveID 235**421:
 - **Assigned Repo 1 (ID 7):** ADA (Australian Data Archive)
 - **Assigned Repo 2 (ID 16):** Open Data LSA (Martin Luther University Halle-Wittenberg)
 
