@@ -1,16 +1,19 @@
-# QDArchive - Seeding Project (Phase 1)
+# QDArchive Phase 1 - Automated Data Acquisition (ID: 23542421)
 
-This repository contains the **Data Acquisition Pipeline** for the QDArchive project.
+This project implements the first phase of the QDArchive data pipeline, focusing on automated repository probing and metadata logging.
 
-## Features
-- **Automated Downloads**: Fetches qualitative data from open repositories.
-- **Robustness**: Handles 404 and 403 errors without crashing.
-- **Metadata Logging**: Saves all transaction details in an SQLite database.
-- **Excel Reporting**: Automatically generates a summary report for evaluation.
+## 🎯 Final Task Assignment
+Based on the provided assignment table and the **Qualitative Data Repositories.xlsx** reference, the following sources were processed for **ActiveID 123542421**:
+- **Assigned Repo 1 (ID 7):** ADA (Australian Data Archive)
+- **Assigned Repo 2 (ID 16):** Open Data LSA (Martin Luther University Halle-Wittenberg)
 
-## Installation
-Run the following command to install dependencies:
-```bash
-pip install -r requirements.txt
+## 🛠️ Implementation Details
+- **Architecture:** Python-based automated pipeline.
+- **Diagnostics:** Analysis of repository accessibility (How and Why) recorded in the `usability_note` column.
+- **Persistence:** Metadata is stored in an SQLite database (`qdarchive_metadata.db`).
+- **Reporting:** Automated Excel report generation for academic review.
 
-python Seeding-QDArchive.py
+## 🚀 Usage
+1. Run `Seeding-QDArchive.py`
+2. Enter the storage directory path.
+3. Review `QDArchive_Final_Report.xlsx` for acquisition status.
