@@ -31,7 +31,7 @@ The database (`qdarchive_metadata.db`) implements the four-table relational mode
     ```
 2.  **Execute the pipeline:**
     ```bash
-    python main.py
+    python Seeding-QDArchive.py
     ```
 3.  **Output:** * `qdarchive_metadata.db`: The SQLite database containing all relational data.
     * `Submission_Final.xlsx`: A multi-sheet Excel report for manual verification.
