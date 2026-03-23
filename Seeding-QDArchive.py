@@ -26,8 +26,10 @@ def create_db_tables(db_path):
     return conn
 
 def run_pipeline(conn):
-    # Tanks 7 and 16
+    # Repositories(1-6-7-16) and search terms (qdpx, mqda, interview study)
     repos = [
+        {"id": 1, "name": "zenodo", "url": "https://zenodo.org/", "search": "https://zenodo.org/search?q="},
+        {"id": 6, "name": "dataverse-no", "url": "https://dataverse.no/", "search": "https://dataverse.no/dataverse/root/?q="},
         {"id": 7, "name": "ada", "url": "https://ada.edu.au/", "search": "https://dataverse.ada.edu.au/dataverse/ada/?q="},
         {"id": 16, "name": "uni-halle", "url": "https://opendata.uni-halle.de/", "search": "https://opendata.uni-halle.de/simple-search?query="}
     ]
@@ -36,7 +38,9 @@ def run_pipeline(conn):
     for repo in repos:
         for term in terms:
             try:
-                res = requests.get(repo["search"] + term, headers=HEADERS, timeout=10)
+                # Replace space with + to prevent search links (especially Zenodo) from breaking
+                formatted_term = term.replace(" ", "+")
+                res = requests.get(repo["search"] + formatted_term, headers=HEADERS, timeout=10)
                 html = res.text
                 
                 # License extraction (including MIT, CC BY, etc.)
@@ -54,13 +58,16 @@ def run_pipeline(conn):
                     (query_string, repository_id, repository_url, project_url, title, description, 
                      language, license, upload_date, download_date, download_repository_folder, download_project_folder, download_method) 
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)''', 
-                    (term, repo["id"], repo["url"], repo["search"]+term, f"Project {term}", "Phase 1: Metadata Extraction", 
+                    (term, repo["id"], repo["url"], repo["search"]+formatted_term, f"Project {term}", "Phase 1: Metadata Extraction", 
                      "en", found_license, found_date, now, repo["name"], f"folder_{term}", "SCRAPING"))
                 
                 p_id = cursor.lastrowid
                 cursor.execute('INSERT INTO KEYWORDS (project_id, keyword) VALUES (?, ?)', (p_id, term))
                 conn.commit()
-            except: pass
+                print(f"✅ Data for {repo['name']} with term '{term}' saved.")
+            except: 
+                print(f"❌ Could not process {repo['name']}")
+                pass
 
 def export_final(db_path, excel_path):
     conn = sqlite3.connect(db_path)
@@ -79,4 +86,4 @@ if __name__ == "__main__":
     c = create_db_tables(db_file)
     run_pipeline(c)
     export_final(db_file, excel_file)
-    print(f"✅ The program has ended.")
+    print(f"✅ The program has ended. Files created in {target}")
