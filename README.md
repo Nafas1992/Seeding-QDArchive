@@ -1,9 +1,9 @@
-# QDArchive Phase 1 - Automated Data Acquisition (ID: 23542421)
+# QDArchive Phase 1 - Automated Data Acquisition (ID: 235**421)
 
 This project implements the first phase of the QDArchive data pipeline, focusing on automated repository probing and metadata logging.
 
 ## 🎯 Final Task Assignment
-Based on the provided assignment table and the **Qualitative Data Repositories.xlsx** reference, the following four sources were processed for **ActiveID 123542421**:
+Based on the provided assignment table and the **Qualitative Data Repositories.xlsx** reference, the following four sources were processed for **ActiveID 235**421**:
 
 1. **Assigned Repo 1 (ID 1):** Zenodo (General-purpose repository)
 2. **Assigned Repo 2 (ID 6):** Dataverse.no (Norwegian Open Research Data)
