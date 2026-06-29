@@ -4,49 +4,86 @@
 
 ---
 
-## 🎯 Project Overview
-This repository contains the full end-to-end automated pipeline developed for the **Seeding QDArchive** course. The project addresses the "chicken-and-egg" problem of attracting researchers to the new QDArchive prototype by building a robust metadata acquisition, homogenization, and industry-standard classification engine using open-source qualitative research data.
+## 🎯 What this script does
+This repository contains a test-ready Python script named `Seeding-QDArchive.py`. It is designed so that anyone can clone the repository, install the required packages, and run the script without editing hard-coded system paths.
 
-The system is fully developed across two distinct academic phases:
-1. **Phase 1 (Data Acquisition):** Programmatic repository probing, scraping, and relational metadata logging.
-2. **Phase 2 (Data Classification & Reporting):** Keyword standardization and smart industry mapping under the official **United Nations ISIC Rev 5** classification guidelines, followed by automated generation of computational deliverables.
-
----
-
-## 🏛️ Assigned Repositories & Search Logic
-Based on the official assignment for **StudentID 23542421**, the following four scientific sources are target-probed:
-* **Repo 1 (ID 1):** Zenodo (`https://zenodo.org/`)
-* **Repo 2 (ID 6):** Dataverse.no (`https://dataverse.no/`)
-* **Repo 3 (ID 7):** ADA - Australian Data Archive (`https://ada.edu.au/`)
-* **Repo 4 (ID 16):** Open Data LSA - Martin Luther University Halle-Wittenberg (`https://opendata.uni-halle.de/`)
-
-### Systematic Search Terms:
-The crawler automatically filters metadata packages across all assigned repositories using the required qualitative search queries:
-1. `qdpx` (REFI-QDA Standard format)
-2. `mqda` (MAXQDA Project format)
-3. `interview study` (Qualitative transcript studies)
+The script performs a simple acquisition workflow:
+* prompts the user for a storage folder
+* downloads test files from public repositories
+* saves metadata into a local SQLite database
+* writes a final Excel report using `pandas`
 
 ---
 
-## 🛠️ Implementation & Technical Features
+## 📦 Prerequisites
+The script requires Python 3.8+ and the packages listed in `requirements.txt`.
 
-### 1. Relational Database Model (Phase 1 & 2 Constraints)
-The pipeline strictly enforces the official SQLite relational database architecture. Metadata is dynamically structured into the following target tables:
-* `PROJECTS`: Primary project meta, source URLs, timestamps, download methods, and assigned ISIC Rev 5 industrial classes.
-* `LICENSES`: Accurate project-specific licensing strings parsed via descriptive Regex mapping.
-* `FILES`: Asset tracking records (`PRIMARY_DATA` or `PROJECT_METADATA`) verifying dataset completeness with status outcomes.
-* `KEYWORDS`: Tokenized key-terms assigned by authors.
-* `PERSON_ROLE`: Participant role associations (e.g., mapping author configurations).
+Required Python packages for `Seeding-QDArchive.py`:
 
-### 2. Phase 2 Advanced Refinements
-* **Keyword Homogenization:** Automatically refines raw metadata tags by splitting comma/semicolon delimiters, shifting text to lowercase, trimming padding spaces, and replacing internal spaces with standard hyphens to ensure uniform index queries.
-* **UN ISIC Rev 5 Classification Mapping:** Programmatically analyzes data profiles to allocate appropriate global industrial division classes (e.g., *Q85 - Education*, *N72 - Scientific research and development*, and *O82 - Office administrative support*).
+* `requests`
+* `pandas`
+* `openpyxl`
 
----
-
-## 📦 Prerequisites & Installation
-
-The pipeline is written in Python 3.8+ and utilizes standard engineering packages alongside specialized reporting engines. Install all required dependencies using `pip`:
+Install dependencies with:
 
 ```bash
-pip install pandas openpyxl matplotlib requests fpdf2
+pip install -r requirements.txt
+```
+
+If you want to run it in a clean virtual environment:
+
+```bash
+python -m venv .venv
+# Windows
+.venد\Scripts\activate
+# macOS / Linux
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+---
+
+## ▶️ Running the script
+From the folder that contains `Seeding-QDArchive.py`, run:
+
+```bash
+python Seeding-QDArchive.py
+```
+
+The script will ask:
+
+```text
+Please enter the storage directory:
+```
+
+Enter any valid folder path where you want outputs saved.
+For example:
+
+* `C:\Users\YourName\Documents\QDArchiveOutput`
+* `./output`
+
+If the folder does not exist, the script creates it automatically.
+
+---
+
+## 📁 Output files
+After execution, the script creates:
+
+* `qdarchive_metadata.db` — local SQLite metadata database
+* `QDArchive_Final_Report.xlsx` — Excel report with the acquired metadata
+
+---
+
+## ✅ Notes for GitHub testers
+* The script does not include personal file paths.
+* It is designed to work on any machine that has Python and the required packages installed.
+* Just clone the repo, install dependencies, and run `python Seeding-QDArchive.py`.
+
+---
+
+## 🧩 Source file
+The main runnable file is:
+
+* `Seeding-QDArchive.py`
+
+Keep `requirements.txt` alongside it to make testing easy for others.
