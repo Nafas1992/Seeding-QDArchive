@@ -72,6 +72,8 @@ After execution, the script creates:
 * `qdarchive_metadata.db` — local SQLite metadata database
 * `QDArchive_Final_Report.xlsx` — Excel report with the acquired metadata
 
+> Note: `Seeding-QDArchive.py` does not generate a PDF file.
+
 ---
 
 ## ✅ Notes for GitHub testers
