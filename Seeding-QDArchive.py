@@ -4,7 +4,7 @@ Real data collection from Zenodo, Dataverse-NO, ADA (HTML), Uni-Halle (HTML)
 Student ID: 23542421
 
 REQUIREMENTS (install once):
-pip install requests pandas openpyxl fpdf2 matplotlib beautifulsoup4 playwright
+pip install requests pandas openpyxl fpdf2 beautifulsoup4 playwright
 playwright install chromium
 """
 
@@ -18,10 +18,6 @@ import urllib.parse
 from datetime import datetime
 
 import pandas as pd
-import matplotlib
-matplotlib.use('Agg')
-import matplotlib.pyplot as plt
-import matplotlib.ticker as ticker
 from fpdf import FPDF
 from fpdf.enums import XPos, YPos
 from bs4 import BeautifulSoup
@@ -373,41 +369,44 @@ def fetch_zenodo(conn):
     for term in ZENODO_SEARCH_TERMS:
         print(f"\n 🔍 Query: '{term}'")
 
-        params_strict = {
+        data = None
+
+        params_primary = {
             "q": term,
             "size": MAX_PER_QUERY,
             "sort": "bestmatch",
-            "access_right": "open",
         }
-
-        data = None
-
         try:
-            r = requests.get(base, params=params_strict,
-                             headers=HEADERS, timeout=30)
+            r = requests.get(base, params=params_primary, headers=HEADERS, timeout=30)
             if not r or r.status_code != 200:
-                print(f" ⚠️ HTTP {r.status_code if r else 'timeout'} (strict)")
+                print(f" ⚠️ HTTP {r.status_code if r else 'timeout'} (primary)")
             else:
-                data = r.json()
+                d = r.json()
+                hits_found = d.get("hits", {}).get("hits", [])
+                if hits_found:
+                    data = d
+                else:
+                    print(" ⚠️ Primary query returned 0 hits, retrying with alternate sort...")
         except Exception as e:
-            print(f" ⚠️ Strict request failed ({type(e).__name__}): {e}")
+            print(f" ⚠️ Primary request failed ({type(e).__name__}): {e}")
 
         if data is None:
-            params_loose = {
+            params_fallback = {
                 "q": term,
                 "size": MAX_PER_QUERY,
-                "sort": "bestmatch",
+                "sort": "mostrecent",
             }
             try:
-                print(" 🔄 Retrying with loose parameters...")
-                r = requests.get(base, params=params_loose,
-                                 headers=HEADERS, timeout=30)
+                print(" 🔄 Retrying with fallback parameters...")
+                r = requests.get(base, params=params_fallback, headers=HEADERS, timeout=30)
                 if not r or r.status_code != 200:
-                    print(f" ⚠️ HTTP {r.status_code if r else 'timeout'} (loose)")
+                    print(f" ⚠️ HTTP {r.status_code if r else 'timeout'} (fallback)")
+                    time.sleep(REQUEST_DELAY)
                     continue
                 data = r.json()
             except Exception as e:
-                print(f" ❌ Loose request failed ({type(e).__name__}): {e}")
+                print(f" ❌ Fallback request failed ({type(e).__name__}): {e}")
+                time.sleep(REQUEST_DELAY)
                 continue
 
         hits = data.get("hits", {}).get("hits", [])
@@ -417,7 +416,7 @@ def fetch_zenodo(conn):
             try:
                 meta = rec.get("metadata", {}) or {}
                 title = meta.get("title", "Untitled")
-                desc = re.sub(r'<[^>]+>', '', meta.get("description", ""))
+                desc = re.sub(r'<[^>]+>', '', meta.get("description", "") or "")
 
                 doi = meta.get("doi", rec.get("doi", ""))
                 pub_date = meta.get("publication_date", "")
@@ -425,21 +424,21 @@ def fetch_zenodo(conn):
                 lang = meta.get("language", "eng")
 
                 lic_obj = meta.get("license", {}) or {}
-                lic = lic_obj.get("id", "unknown")
+                lic = lic_obj.get("id", "unknown") if isinstance(lic_obj, dict) else "unknown"
 
-                kws = ", ".join(meta.get("keywords", []))
+                kws = ", ".join(meta.get("keywords", []) or [])
 
-                file_names = [f.get("key", "file") for f in rec.get("files", [])]
+                file_names = [f.get("key", "file") for f in rec.get("files", []) or []]
                 if not file_names:
                     file_names = [f"{rec.get('id','record')}.zip"]
 
                 creators = [
                     {"name": c.get("name", "Unknown"), "role": "AUTHOR"}
-                    for c in meta.get("creators", [])
+                    for c in meta.get("creators", []) or []
                 ] or [{"name": "Unknown", "role": "AUTHOR"}]
 
                 links = rec.get("links", {}) or {}
-                url = links.get("self_html") or links.get("self") or ""
+                url = links.get("self_html") or links.get("self") or f"https://zenodo.org/record/{rec.get('id','')}"
 
                 insert_project(
                     conn,
@@ -458,9 +457,10 @@ def fetch_zenodo(conn):
                 )
                 total += 1
                 print(f" ✔ [{pub_date}] {title[:70]}")
-                time.sleep(REQUEST_DELAY)
             except Exception as e:
                 print(f" ❌ Error parsing/inserting one record: {e}")
+
+        time.sleep(REQUEST_DELAY)
 
     print(f"\n ✅ Zenodo total inserted: {total}")
     return total
@@ -845,13 +845,11 @@ def fetch_uni_halle_html_and_insert(conn):
     return grand_total
 
 # =====================================================================
-# EXCEL و PDF کاملاً هماهنگ با پاورپوینت (اسلاید ۲۵ و ۲۶)[cite: 2]
+# EXCEL — طبق اسلاید ۲۸ (Part 2 Step 4c)
+# ستون‌های خواسته‌شده دقیقاً: repository_id, project_type, project_title,
+# primary_class, secondary_class, no_project_files
 # =====================================================================
 def export_excel(db_path, out_path):
-    """
-    خروجی فایل اکسل دقیقاً منطبق بر پاورپوینت اسلاید ۲۵:[cite: 2]
-    شامل ستون‌های: repository_id, project_type, project_title, primary_class, secondary_class, no_project_files
-    """
     conn = sqlite3.connect(db_path)
     df = pd.read_sql_query('''
     SELECT
@@ -867,7 +865,7 @@ def export_excel(db_path, out_path):
     ORDER BY P.repository_id, P.type, P.title
     ''', conn)
     conn.close()
-    
+
     with pd.ExcelWriter(out_path, engine='openpyxl') as w:
         df.to_excel(w, index=False, sheet_name="Classifications")
         ws = w.sheets["Classifications"]
@@ -876,15 +874,100 @@ def export_excel(db_path, out_path):
                 len(str(col[0].value)) + 2,
                 max((len(str(c.value)) for c in col if c.value), default=10)
             )
-    print(f"\n📊 Excel Generated successfully -> {out_path} ({len(df)} rows) [Slide 25 Aligned]")
+    print(f"\n📊 Excel Generated successfully -> {out_path} ({len(df)} rows) [Slide 28 Aligned]")
     return df
+
+# =====================================================================
+# نمودار برداری خالص (بدون هیچ PNG/رستر) — طبق اسلاید ۳۰
+# =====================================================================
+def draw_vector_histogram(pdf, fn, class_counts, chart_width=190):
+    """
+    "Histogram of primary classes identified" را کاملاً با ابزارهای برداری
+    خود FPDF (rect / line / متن چرخش‌یافته) رسم می‌کند — بدون تولید هیچ
+    فایل PNG میانی — تا PDF نهایی واقعاً برداری و قابل زوم بدون افت
+    کیفیت باشد (طبق اسلاید ۳۰: "use vector graphics ... so that one can
+    zoom in"). اسم کامل هر کلاس (بدون بریدن/سه‌نقطه) به‌عنوان لیبل محور
+    استفاده می‌شود ("use the full class name as the bin name") و عدد
+    شمارش دقیقاً بالای هر ستون چاپ می‌شود ("count as a number on top of
+    the visualizing bar").
+    """
+    items = sorted(class_counts.items(), key=lambda x: x[1], reverse=True)
+    if not items:
+        return
+    n = len(items)
+    max_count = max(c for _, c in items) or 1
+    max_label_len = max(len(c) for c, _ in items)
+
+    # اندازه‌ی فونت لیبل بر اساس طول طولانی‌ترین اسم کامل کلاس تنظیم می‌شود
+    label_font = 6.5
+    if max_label_len > 55:
+        label_font = 5.5
+    if max_label_len > 75:
+        label_font = 5.0
+
+    char_w_mm = 0.5 * label_font * 0.352778
+    label_room = max_label_len * char_w_mm + 10  # فضای عمودی لازم برای لیبل‌های چرخیده
+
+    bar_area_height = 60
+    top_gap = 9
+    total_block_height = top_gap + bar_area_height + label_room + 6
+
+    # اگر جای کافی روی صفحه‌ی فعلی نیست، برو صفحه‌ی جدید
+    if pdf.get_y() + total_block_height > pdf.h - pdf.b_margin:
+        pdf.add_page()
+
+    pdf.set_font(fn, 'B', 11)
+    pdf.cell(0, 8, "Histogram of Primary Classes Identified",
+              new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+    x0 = pdf.l_margin
+    top_y = pdf.get_y() + top_gap
+    baseline_y = top_y + bar_area_height
+
+    bar_gap = 2.5
+    bar_width = (chart_width - (n - 1) * bar_gap) / n
+    bar_width = max(3, min(bar_width, 14))
+    total_width = n * bar_width + (n - 1) * bar_gap
+    x_start = x0 + max(0, (chart_width - total_width) / 2)
+
+    # محور پایه (خط افقی صفر)
+    pdf.set_draw_color(120, 120, 120)
+    pdf.set_line_width(0.25)
+    pdf.line(x0, baseline_y, x0 + chart_width, baseline_y)
+
+    for i, (cls_name, cnt) in enumerate(items):
+        bar_h = (cnt / max_count) * (bar_area_height - 6)
+        bx = x_start + i * (bar_width + bar_gap)
+        by = baseline_y - bar_h
+
+        # ستون میله‌ای (برداری - rect واقعی PDF، نه تصویر)
+        pdf.set_fill_color(44, 62, 80)
+        pdf.set_draw_color(52, 73, 94)
+        pdf.rect(bx, by, bar_width, max(bar_h, 0.3), style='FD')
+
+        # عدد شمارش، دقیقاً بالای ستون
+        pdf.set_font(fn, 'B', 7)
+        pdf.set_xy(bx - 6, by - 5)
+        pdf.cell(bar_width + 12, 4.5, str(cnt), align='C')
+
+        # اسم کامل کلاس، چرخیده ۹۰ درجه، زیر محور (بدون هیچ کوتاه‌سازی)
+        label_anchor_x = bx + bar_width / 2 + 1.5
+        label_anchor_y = baseline_y + 1.5
+        pdf.set_font(fn, '', label_font)
+        with pdf.rotation(90, x=label_anchor_x, y=label_anchor_y):
+            pdf.set_xy(label_anchor_x, label_anchor_y)
+            pdf.cell(95, 3, cls_name, align='L')
+
+    pdf.set_y(baseline_y + label_room + 4)
 
 def generate_pdf(db_path, pdf_path, base_dir):
     """
-    تولید گزارش PDF کاملاً منطبق بر پاورپوینت اسلاید ۲۶:[cite: 2]
-    ۱. هیستوگرام با کیفیت به همراه نمایش عدد تعداد فرکانس بالای هر ستون
-    ۲. جدول رتبه‌بندی شده و دقیق کلاس‌ها (Top 20 Classes Table)
-    ۳. بخش تحلیلی به نام Comments on Findings برای هر مخزن به تفکیک
+    تولید گزارش PDF کاملاً منطبق بر اسلاید ۳۰ (Part 2 Step 4d):
+    برای هر Repository:
+    ۱. هیستوگرام برداری (نه PNG) با اسم کامل کلاس‌ها و عدد بالای هر ستون
+    ۲. جدول رتبه‌بندی‌شده‌ی حداکثر ۲۰ کلاس برتر با شمارش هرکدام
+    ۳. بخش "Comments on Findings"
+    و ادامه با مخزن بعدی
     """
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
@@ -927,54 +1010,13 @@ def generate_pdf(db_path, pdf_path, base_dir):
         classes = [r[0] for r in rows]
         counts = [r[1] for r in rows]
         dominant = classes[0]
+        class_counts = dict(rows)
 
-        fig, ax = plt.subplots(figsize=(8, 3.5))
-        x = range(len(classes))
+        # ۱. هیستوگرام کاملاً برداری (اسلاید ۳۰)
+        draw_vector_histogram(pdf, fn, class_counts)
+        pdf.ln(6)
 
-        label_max_len = 40
-        short_labels = [
-            (cls if len(cls) <= label_max_len else cls[:label_max_len] + "…")
-            for cls in classes
-        ]
-
-        # رسم هیستوگرام
-        bars = ax.bar(x, counts, color="#2c3e50", edgecolor="#34495e")
-        ax.set_xticks(x)
-        ax.set_xticklabels(short_labels, rotation=25, ha='right', fontsize=6)
-        ax.set_ylabel("Count of Projects")
-        ax.set_title(f"Histogram of Primary Classes - {repo_folder.upper()}")
-
-        # شرط اسلاید ۲۶: ثبت اعداد دقیقاً بالای هر ستون از هیستوگرام[cite: 2]
-        for bar in bars:
-            yval = bar.get_height()
-            ax.text(
-                bar.get_x() + bar.get_width() / 2.0,
-                yval + 0.1,
-                str(int(yval)),
-                ha='center',
-                va='bottom',
-                fontsize=7,
-                fontweight='bold'
-            )
-
-        ax.yaxis.set_major_locator(ticker.MaxNLocator(integer=True))
-
-        plt.subplots_adjust(
-            left=0.08,
-            right=0.98,
-            top=0.90,
-            bottom=0.35
-        )
-
-        hist_path = os.path.join(base_dir, f"hist_repo_{repo_id}.png")
-        fig.savefig(hist_path, dpi=300)
-        plt.close(fig)
-
-        # چسباندن نمودار به PDF
-        pdf.image(hist_path, w=180)
-        pdf.ln(5)
-
-        # ۲. جدول رتبه‌بندی شده از حداکثر ۲۰ کلاس برتر (Top 20 Classes Table)[cite: 2]
+        # ۲. جدول رتبه‌بندی‌شده‌ی حداکثر ۲۰ کلاس برتر با اسم کامل کلاس
         pdf.set_font(fn, 'B', 11)
         pdf.cell(
             0, 8,
@@ -984,17 +1026,16 @@ def generate_pdf(db_path, pdf_path, base_dir):
         pdf.ln(2)
 
         pdf.set_font(fn, 'B', 9)
-        pdf.cell(140, 7, "Class Name", border=1)
+        pdf.cell(150, 7, "Class Name", border=1)
         pdf.cell(30, 7, "Project Count", border=1, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
 
         pdf.set_font(fn, '', 8.5)
-        for (cls_name, cnt) in rows[:20]: # تضمین محدودیت به حداکثر ۲۰ کلاس اول
-            display_cls = cls_name if len(cls_name) <= 85 else cls_name[:85] + "…"
-            pdf.cell(140, 6, display_cls, border=1)
+        for (cls_name, cnt) in rows[:20]:
+            pdf.cell(150, 6, cls_name, border=1)
             pdf.cell(30, 6, str(cnt), border=1, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
         pdf.ln(6)
 
-        # ۳. بخش نظرات و تحلیلی مشخص و دقیق (Comments on Findings - Slide 26)[cite: 2]
+        # ۳. بخش نظرات و تحلیلی (Comments on Findings)
         total_r = sum(counts)
         pdf.set_font(fn, 'B', 10)
         pdf.cell(
@@ -1013,13 +1054,9 @@ def generate_pdf(db_path, pdf_path, base_dir):
         )
         pdf.ln(8)
 
-        # پاکسازی تصویر کمکی نمودار
-        if os.path.exists(hist_path):
-            os.remove(hist_path)
-
     pdf.output(pdf_path)
     conn.close()
-    print(f"📄 PDF Report Generated successfully -> {pdf_path} [Slide 26 Aligned]")
+    print(f"📄 PDF Report Generated successfully -> {pdf_path} [Slide 30 Aligned - Vector Graphics]")
 
 # =====================================================================
 # MAIN
@@ -1052,7 +1089,6 @@ if __name__ == "__main__":
     print(f" TOTAL REAL PROJECTS COLLECTED: {grand_total}")
     print(f"{'='*65}")
 
-    # فراخوانی توابع جدید و منطبق بر پاورپوینت برای گرفتن بهترین نمره پروژه
     export_excel(db_path, excel_path)
     generate_pdf(db_path, pdf_path, base_dir)
 
