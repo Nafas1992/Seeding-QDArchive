@@ -1,15 +1,11 @@
 """
 Phase 2 - SQ26 Seeding QDArchive
-Real data collection from Zenodo, GitHub, Dataverse APIs
+Real data collection from Zenodo, Dataverse-NO, ADA (HTML + API), Uni-Halle (HTML)
 Student ID: 23542421
 
 REQUIREMENTS (install once):
-    pip install requests pandas openpyxl fpdf2 matplotlib
-
-GITHUB TOKEN (optional but recommended - 5000 req/hr vs 60):
-    1. Go to https://github.com/settings/tokens
-    2. Generate new token (classic) - no scopes needed for public repos
-    3. Paste it in GITHUB_TOKEN below
+pip install requests pandas openpyxl fpdf2 matplotlib beautifulsoup4 playwright
+playwright install chromium
 """
 
 import os
@@ -21,12 +17,14 @@ import asyncio
 import json
 import urllib.parse
 from datetime import datetime
+
 import pandas as pd
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.ticker as ticker
 from fpdf import FPDF
+from bs4 import BeautifulSoup
 
 try:
     from playwright.sync_api import sync_playwright
@@ -36,58 +34,25 @@ except ImportError:
     HAS_PLAYWRIGHT = False
 
 # =====================================================================
-# ⚙️  CONFIGURATION  -  Edit these before running
+# ⚙️ CONFIGURATION
 # =====================================================================
-STUDENT_ID      = "23542421"
-GITHUB_TOKEN    = "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"          # Optional: paste your GitHub token here
-CUSTOM_OUT_DIR  = ""  # Leave empty to choose the output folder at runtime
+STUDENT_ID = "23542421"
+CUSTOM_OUT_DIR = ""  # Leave empty to choose the output folder at runtime
 
-MAX_PER_QUERY   = 20          # records to fetch per search query (increase for more data)
-REQUEST_DELAY   = 1.0         # seconds between API calls (be polite)
-# =====================================================================
+MAX_PER_QUERY = 20  # records to fetch per search query
+REQUEST_DELAY = 1.0  # seconds between API calls
 
-DB_NAME       = f"{STUDENT_ID}-sq26-classification.db"
-BASE_DIR      = None
-DB_PATH       = None
-EXCEL_PATH    = None
-PDF_PATH      = None
-
-
-def resolve_output_dir():
-    """Ask the user for an output folder and create it if needed."""
-    if CUSTOM_OUT_DIR:
-        out_dir = os.path.expanduser(CUSTOM_OUT_DIR)
-        if os.path.isdir(out_dir):
-            return out_dir
-        print(f"⚠️  CUSTOM_OUT_DIR is set but invalid: {out_dir}")
-
-    while True:
-        prompt = ("Enter full output folder path for DB/XLSX/PDF, or press Enter to use the current script folder:\n"
-                  "> ")
-        candidate = input(prompt).strip()
-        if not candidate:
-            candidate = os.path.dirname(os.path.abspath(__file__))
-        candidate = os.path.expanduser(candidate)
-        if os.path.exists(candidate):
-            if os.path.isdir(candidate):
-                return candidate
-            print(f"⚠️  Path exists but is not a folder: {candidate}")
-            continue
-        try:
-            os.makedirs(candidate, exist_ok=True)
-            return candidate
-        except OSError as e:
-            print(f"⚠️  Could not create folder '{candidate}': {e}")
-            print("Please enter a different path.")
+DB_NAME = f"{STUDENT_ID}-sq26-classification.db"
+BASE_DIR = None
+DB_PATH = None
+EXCEL_PATH = None
+PDF_PATH = None
 
 HEADERS = {'User-Agent': 'Mozilla/5.0 SQ26-Seeder/1.0'}
-GH_HEADERS = {**HEADERS, 'Accept': 'application/vnd.github.v3+json'}
-if GITHUB_TOKEN:
-    GH_HEADERS['Authorization'] = f'token {GITHUB_TOKEN}'
 
-# ─────────────────────────────────────────────────────────────────────
-# ISIC Rev.5  Section → Division taxonomy (two levels as per Step 2)
-# ─────────────────────────────────────────────────────────────────────
+# =====================================================================
+# ISIC / FILE TYPE / SEARCH TERMS
+# =====================================================================
 ISIC = {
     "01": ("A", "Crop and animal production, hunting and related service activities"),
     "02": ("A", "Forestry and logging"),
@@ -141,21 +106,15 @@ ISIC = {
     "99": ("U", "Activities of extraterritorial organisations and bodies"),
 }
 
-QDA_EXTENSIONS     = {'.qdpx','.mx24','.mx','.qda','.nvp','.nud',
-                      '.atlproj','.f4p','.refi','.max','.qde'}
-PRIMARY_EXTENSIONS = {'.pdf','.doc','.docx','.txt','.rtf','.odt',
-                      '.jpg','.jpeg','.png','.mp3','.mp4','.wav',
-                      '.csv','.xlsx','.xls','.tsv'}
-
-# ─────────────────────────────────────────────────────────────────────
-# Repositories config
-# ─────────────────────────────────────────────────────────────────────
-REPOS = [
-    {"id": 1,  "name": "zenodo",       "url": "https://zenodo.org/"},
-    {"id": 6,  "name": "dataverse-no", "url": "https://dataverse.no/"},
-    {"id": 7,  "name": "ada",          "url": "https://dataverse.ada.edu.au/"},
-    {"id": 16, "name": "uni-halle",    "url": "https://opendata.uni-halle.de/"},
-]
+QDA_EXTENSIONS = {
+    '.qdpx', '.mx24', '.mx', '.qda', '.nvp', '.nud',
+    '.atlproj', '.f4p', '.refi', '.max', '.qde'
+}
+PRIMARY_EXTENSIONS = {
+    '.pdf', '.doc', '.docx', '.txt', '.rtf', '.odt',
+    '.jpg', '.jpeg', '.png', '.mp3', '.mp4', '.wav',
+    '.csv', '.xlsx', '.xls', '.tsv'
+}
 
 SEARCH_TERMS = [
     "qdpx", "mqda", "refi-qda", "qualitative data analysis",
@@ -163,57 +122,113 @@ SEARCH_TERMS = [
     "atlas.ti qualitative", "thematic analysis interview"
 ]
 
+# =====================================================================
+# REPOSITORIES
+# =====================================================================
+REPO_ZENODO = {"id": 1, "name": "zenodo", "url": "https://zenodo.org/"}
+REPO_DATAVERSE_NO = {"id": 6, "name": "dataverse-no", "url": "https://dataverse.no/"}
+REPO_ADA_API = {"id": 7, "name": "ada", "url": "https://dataverse.ada.edu.au/"}
+REPO_ADA_HTML = {
+    "id": 7,
+    "name": "ada-html",
+    "url": "https://dataverse.ada.edu.au/dataverse/ada/",
+    "search_base": "https://dataverse.ada.edu.au/dataverse/ada/?q=",
+    "dataset_api": "https://dataverse.ada.edu.au/api/datasets/:persistentId/"
+}
+REPO_UNI_HALLE = {
+    "id": 16,
+    "name": "uni-halle",
+    "url": "https://opendata.uni-halle.de/",
+    "search_base": "https://opendata.uni-halle.de/simple-search?query="
+}
+
+BROWSER_PROFILE_DIR = ".playwright-uni-halle-profile"
+PAGE_WAIT_MS = 2000
+MAX_ITEMS_HTML = 50
+
+CHALLENGE_MAX_WAIT_S = 180
+CHALLENGE_POLL_S = 2
+CHALLENGE_MARKERS = [
+    "are you a robot", "i'm not a robot", "im not a robot", "not a robot",
+    "verify you are human", "verifying you are human", "verify you're human",
+    "making sure you're not a bot", "checking your browser",
+    "just a moment", "attention required", "captcha", "hcaptcha",
+    "recaptcha", "anubis", "access denied", "please enable javascript",
+]
 
 # =====================================================================
-# DATABASE
+# OUTPUT DIR / DATABASE
 # =====================================================================
+def resolve_output_dir():
+    if CUSTOM_OUT_DIR:
+        out_dir = os.path.expanduser(CUSTOM_OUT_DIR)
+        if os.path.isdir(out_dir):
+            return out_dir
+        print(f"⚠️ CUSTOM_OUT_DIR is set but invalid: {out_dir}")
+
+    while True:
+        prompt = ("Enter full output folder path for DB/XLSX/PDF, or press Enter to use the current script folder:\n> ")
+        candidate = input(prompt).strip()
+        if not candidate:
+            candidate = os.path.dirname(os.path.abspath(__file__))
+        candidate = os.path.expanduser(candidate)
+        if os.path.exists(candidate):
+            if os.path.isdir(candidate):
+                return candidate
+            print(f"⚠️ Path exists but is not a folder: {candidate}")
+            continue
+        try:
+            os.makedirs(candidate, exist_ok=True)
+            return candidate
+        except OSError as e:
+            print(f"⚠️ Could not create folder '{candidate}': {e}")
+            print("Please enter a different path.")
+
 def init_db(path):
     if os.path.exists(path):
         os.remove(path)
     conn = sqlite3.connect(path)
     c = conn.cursor()
     c.execute('''CREATE TABLE PROJECTS (
-        id                         INTEGER PRIMARY KEY AUTOINCREMENT,
-        query_string               TEXT,
-        repository_id              INTEGER,
-        repository_url             TEXT,
-        project_url                TEXT,
-        version                    TEXT,
-        type                       TEXT,
-        primary_class              TEXT,
-        secondary_class            TEXT,
-        class                      TEXT,
-        title                      TEXT,
-        description                TEXT,
-        language                   TEXT,
-        doi                        TEXT,
-        upload_date                DATE,
-        download_date              TIMESTAMP,
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        query_string TEXT,
+        repository_id INTEGER,
+        repository_url TEXT,
+        project_url TEXT,
+        version TEXT,
+        type TEXT,
+        primary_class TEXT,
+        secondary_class TEXT,
+        class TEXT,
+        title TEXT,
+        description TEXT,
+        language TEXT,
+        doi TEXT,
+        upload_date DATE,
+        download_date TIMESTAMP,
         download_repository_folder TEXT,
-        download_project_folder    TEXT,
-        download_version_folder    TEXT,
-        download_method            TEXT
+        download_project_folder TEXT,
+        download_version_folder TEXT,
+        download_method TEXT
     )''')
     c.execute('CREATE TABLE LICENSES (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER, license TEXT)')
-    c.execute('CREATE TABLE FILES    (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER, class TEXT, file_name TEXT, file_type TEXT, status TEXT)')
+    c.execute('CREATE TABLE FILES (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER, class TEXT, file_name TEXT, file_type TEXT, status TEXT)')
     c.execute('CREATE TABLE KEYWORDS (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER, keyword TEXT)')
     c.execute('CREATE TABLE PERSON_ROLE (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER, name TEXT, role TEXT)')
     conn.commit()
     return conn
 
-
 # =====================================================================
-# HELPERS
+# HELPERS: TEXT / HTTP / CLASSIFICATION
 # =====================================================================
 def safe_get(url, params=None, headers=None, retries=3):
-    """HTTP GET with retry and polite delay."""
     h = headers or HEADERS
     for attempt in range(retries):
         try:
             r = requests.get(url, params=params, headers=h, timeout=15)
             if r.status_code == 429:
                 wait = int(r.headers.get('Retry-After', 60))
-                print(f"   ⏳ Rate limited – waiting {wait}s ...")
+                print(f" ⏳ Rate limited – waiting {wait}s ...")
                 time.sleep(wait)
                 continue
             return r
@@ -223,106 +238,26 @@ def safe_get(url, params=None, headers=None, retries=3):
             time.sleep(2 ** attempt)
     return None
 
-
-def is_bot_challenge_html(text):
-    lower = text.lower()
-    return any(token in lower for token in ["are you a robot", "not a robot", "making sure you\'re not a bot", "captcha", "altcha"])
-
-
-def fetch_dataverse_browser_search(repo, params):
-    """Attempt to fetch uni-halle search JSON through Playwright if the API is blocked."""
-    if not HAS_PLAYWRIGHT:
-        return None
-    api_url = repo["url"].rstrip('/') + "/api/search"
-    try:
-        with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
-            page = browser.new_page(user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36')
-            page.goto(repo["url"], wait_until='domcontentloaded', timeout=30000)
-            page_text = page.content()
-            if is_bot_challenge_html(page_text):
-                # Try an interactive verification if challenge blocks the headless request.
-                browser.close()
-                return fetch_dataverse_manual_verify(repo, params)
-
-            response = page.goto(f"{api_url}?{urllib.parse.urlencode(params)}", wait_until='networkidle', timeout=30000)
-            if not response:
-                browser.close()
-                return None
-
-            content_type = response.headers.get('content-type', '')
-            text = response.text()
-            if 'json' not in content_type.lower():
-                if is_bot_challenge_html(text):
-                    print("     ⚠️  uni-halle API request hit bot challenge page; skipping.")
-                browser.close()
-                return None
-
-            browser.close()
-            return json.loads(text)
-    except Exception as e:
-        print(f"     ⚠️  Playwright fallback failed: {e}")
-        return None
-
-
-async def fetch_dataverse_manual_verify_async(repo, params):
-    api_url = repo["url"].rstrip('/') + "/api/search"
-    async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=False)
-        page = await browser.new_page(user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36')
-        await page.goto(repo["url"], wait_until='domcontentloaded', timeout=30000)
-        print("     ⚠️  uni-halle blocked by bot protection.")
-        print("     Please complete the 'I'm not a robot' check in the opened browser window.")
-        print("     After verification, return here and press Enter to continue.")
-        input("     Press Enter when ready to continue... ")
-
-        # Reload the site to ensure verification cookies are applied.
-        await page.goto(repo["url"], wait_until='networkidle', timeout=30000)
-        page_text = await page.content()
-        if is_bot_challenge_html(page_text):
-            print("     ⚠️  uni-halle still shows bot protection after manual verification.")
-            await browser.close()
-            return None
-
-        response = await page.goto(f"{api_url}?{urllib.parse.urlencode(params)}", wait_until='networkidle', timeout=30000)
-        if not response:
-            await browser.close()
-            return None
-
-        content_type = response.headers.get('content-type', '')
-        text = await response.text()
-        await browser.close()
-        if 'json' not in content_type.lower() or is_bot_challenge_html(text):
-            print("     ⚠️  uni-halle API still blocked after manual verification.")
-            return None
-
-        return json.loads(text)
-
-
-def fetch_dataverse_manual_verify(repo, params):
-    """Open a browser so the user can manually complete uni-halle verification."""
-    if not HAS_PLAYWRIGHT:
-        return None
-    try:
-        return asyncio.run(fetch_dataverse_manual_verify_async(repo, params))
-    except Exception as e:
-        print(f"     ⚠️  Playwright manual verification failed: {e}")
-        return None
-
+def clean_text(s):
+    return re.sub(r"\s+", " ", s or "").strip()
 
 def derive_project_type(files):
-    """Step 1: QDA_PROJECT / QD_PROJECT / OTHER_PROJECT / NOT_A_PROJECT"""
     has_qda = has_primary = has_other = False
     for fname in files:
         ext = os.path.splitext(fname)[1].lower()
-        if ext in QDA_EXTENSIONS:      has_qda     = True
-        elif ext in PRIMARY_EXTENSIONS: has_primary = True
-        else:                           has_other   = True
-    if has_qda:     return "QDA_PROJECT"
-    if has_primary: return "QD_PROJECT"
-    if has_other:   return "OTHER_PROJECT"
+        if ext in QDA_EXTENSIONS:
+            has_qda = True
+        elif ext in PRIMARY_EXTENSIONS:
+            has_primary = True
+        else:
+            has_other = True
+    if has_qda:
+        return "QDA_PROJECT"
+    if has_primary:
+        return "QD_PROJECT"
+    if has_other:
+        return "OTHER_PROJECT"
     return "NOT_A_PROJECT"
-
 
 def isic_label(code):
     if code in ISIC:
@@ -330,29 +265,27 @@ def isic_label(code):
         return f"Sec {sec} / Div {code} - {name}"
     return f"Div {code} - Unknown"
 
-
 def classify_isic(title, desc, keywords, ptype):
-    """Step 2: two-level ISIC Rev.5 keyword classifier."""
     text = f"{title} {desc} {' '.join(keywords)}".lower()
     rules = [
         (r'qdpx|mqda|refi.qda|atlas\.ti|nvivo|maxqda|qualitative.analys', '72'),
         (r'interview|transcript|qualitative.data|grounded.theory|thematic', '72'),
-        (r'survey|questionnaire|mixed.method|coding.frame',                 '72'),
-        (r'education|teaching|learning|pedagogy|school|university',         '85'),
-        (r'health|clinical|patient|hospital|nursing|therapy|medical',       '86'),
-        (r'social.work|welfare|community.care',                             '88'),
-        (r'software|programming|algorithm|computer.science|data.science',   '62'),
-        (r'information.service|digital.archive|open.data|repository',       '63'),
-        (r'publish|journal|open.access|scholarly.communication',            '58'),
-        (r'library|archive|museum|cultural.heritage|digital.humanities',    '91'),
-        (r'legal|law|court|justice|regulation|policy',                      '69'),
-        (r'finance|bank|investment|insurance|economic',                     '64'),
-        (r'environment|pollution|climate|ecology|sustainability',           '38'),
-        (r'agriculture|farming|crop|livestock|rural',                       '01'),
-        (r'construction|building|infrastructure|urban.planning',            '41'),
-        (r'media|film|video|broadcast|journalism',                          '59'),
-        (r'sport|recreation|leisure|tourism',                               '93'),
-        (r'arts|creative|culture|performance|music',                        '90'),
+        (r'survey|questionnaire|mixed.method|coding.frame', '72'),
+        (r'education|teaching|learning|pedagogy|school|university', '85'),
+        (r'health|clinical|patient|hospital|nursing|therapy|medical', '86'),
+        (r'social.work|welfare|community.care', '88'),
+        (r'software|programming|algorithm|computer.science|data.science', '62'),
+        (r'information.service|digital.archive|open.data|repository', '63'),
+        (r'publish|journal|open.access|scholarly.communication', '58'),
+        (r'library|archive|museum|cultural.heritage|digital.humanities', '91'),
+        (r'legal|law|court|justice|regulation|policy', '69'),
+        (r'finance|bank|investment|insurance|economic', '64'),
+        (r'environment|pollution|climate|ecology|sustainability', '38'),
+        (r'agriculture|farming|crop|livestock|rural', '01'),
+        (r'construction|building|infrastructure|urban.planning', '41'),
+        (r'media|film|video|broadcast|journalism', '59'),
+        (r'sport|recreation|leisure|tourism', '93'),
+        (r'arts|creative|culture|performance|music', '90'),
     ]
     matched = []
     for pattern, code in rules:
@@ -361,9 +294,8 @@ def classify_isic(title, desc, keywords, ptype):
         if len(matched) >= 2:
             break
     if not matched:
-        matched = ['72'] if ptype in ('QDA_PROJECT','QD_PROJECT') else ['82']
+        matched = ['72'] if ptype in ('QDA_PROJECT', 'QD_PROJECT') else ['82']
     return matched[0], (matched[1] if len(matched) > 1 else None)
-
 
 def clean_keywords(raw):
     result = []
@@ -372,7 +304,6 @@ def clean_keywords(raw):
         if t:
             result.append(re.sub(r'\s+', '-', t))
     return result
-
 
 def insert_project(conn, repo, query, title, desc, url, doi,
                    upload_date, files, license_str, keywords,
@@ -386,26 +317,29 @@ def insert_project(conn, repo, query, title, desc, url, doi,
     sec_label = isic_label(sec) if sec else None
 
     c.execute('''INSERT INTO PROJECTS
-        (query_string,repository_id,repository_url,project_url,version,type,
-         primary_class,secondary_class,class,title,description,language,doi,
-         upload_date,download_date,download_repository_folder,
-         download_project_folder,download_version_folder,download_method)
-        VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
-        (query, repo["id"], repo["url"], url, "v1.0", ptype,
-         pri_label, sec_label, pri_label,
-         title[:500], (desc or '')[:1000], language, doi or '',
-         upload_date, now, repo["name"],
-         f"project_{repo['id']}_{re.sub(r'[^a-z0-9]','_',title[:30].lower())}",
-         "v1", "API"))
+    (query_string,repository_id,repository_url,project_url,version,type,
+     primary_class,secondary_class,class,title,description,language,doi,
+     upload_date,download_date,download_repository_folder,
+     download_project_folder,download_version_folder,download_method)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)''',
+    (query, repo["id"], repo["url"], url, "v1.0", ptype,
+     pri_label, sec_label, pri_label,
+     title[:500], (desc or '')[:1000], language, doi or '',
+     upload_date, now, repo["name"],
+     f"project_{repo['id']}_{re.sub(r'[^a-z0-9]','_',title[:30].lower())}",
+     "v1", "API/HTML"))
 
     pid = c.lastrowid
     c.execute('INSERT INTO LICENSES VALUES (NULL,?,?)', (pid, license_str or 'unknown'))
 
     for fname in files:
-        ext  = os.path.splitext(fname)[1].lower()
-        if ext in QDA_EXTENSIONS:       fclass = "ANALYSIS_DATA"
-        elif ext in PRIMARY_EXTENSIONS: fclass = "PRIMARY_DATA"
-        else:                           fclass = "ADDITIONAL_DATA"
+        ext = os.path.splitext(fname)[1].lower()
+        if ext in QDA_EXTENSIONS:
+            fclass = "ANALYSIS_DATA"
+        elif ext in PRIMARY_EXTENSIONS:
+            fclass = "PRIMARY_DATA"
+        else:
+            fclass = "ADDITIONAL_DATA"
         c.execute('INSERT INTO FILES VALUES (NULL,?,?,?,?,?)',
                   (pid, fclass, fname, ext.lstrip('.') or 'unknown', "SUCCEEDED"))
 
@@ -414,21 +348,16 @@ def insert_project(conn, repo, query, title, desc, url, doi,
 
     for person in creators:
         c.execute('INSERT INTO PERSON_ROLE VALUES (NULL,?,?,?)',
-                  (pid, person.get('name','Unknown'), person.get('role','AUTHOR')))
+                  (pid, person.get('name', 'Unknown'), person.get('role', 'AUTHOR')))
 
     conn.commit()
     return pid, ptype, pri_label
 
-
 # =====================================================================
-# ZENODO API  (no token needed, free)
+# ZENODO API
 # =====================================================================
 def fetch_zenodo(conn):
-    """
-    Zenodo REST API v3 - https://developers.zenodo.org/
-    Returns real qualitative research datasets with open licenses.
-    """
-    repo = {"id": 1, "name": "zenodo", "url": "https://zenodo.org/"}
+    repo = REPO_ZENODO
     base = "https://zenodo.org/api/records"
     total = 0
 
@@ -437,33 +366,32 @@ def fetch_zenodo(conn):
     print("─"*60)
 
     for term in SEARCH_TERMS:
-        print(f"\n  🔍 Query: '{term}'")
+        print(f"\n 🔍 Query: '{term}'")
         try:
             params = {
                 "q": term,
                 "size": MAX_PER_QUERY,
                 "sort": "mostrecent",
-                "access_right": "open",   # open license only
+                "access_right": "open",
                 "type": "dataset",
             }
             r = safe_get(base, params=params)
             if not r or r.status_code != 200:
-                print(f"     ⚠️  HTTP {r.status_code if r else 'timeout'}")
+                print(f" ⚠️ HTTP {r.status_code if r else 'timeout'}")
                 continue
 
             data = r.json()
             hits = data.get("hits", {}).get("hits", [])
-            print(f"     Found {len(hits)} records")
+            print(f" Found {len(hits)} records")
 
             for rec in hits:
-                meta     = rec.get("metadata", {})
-                title    = meta.get("title", "Untitled")
-                desc     = re.sub(r'<[^>]+>', '', meta.get("description", ""))
-                doi      = meta.get("doi", "")
+                meta = rec.get("metadata", {})
+                title = meta.get("title", "Untitled")
+                desc = re.sub(r'<[^>]+>', '', meta.get("description", ""))
+                doi = meta.get("doi", "")
                 pub_date = meta.get("publication_date", "")
-                lang     = meta.get("language", "en")
+                lang = meta.get("language", "en")
 
-                # License
                 lic_list = meta.get("license", {})
                 if isinstance(lic_list, dict):
                     lic = lic_list.get("id", "CC-BY")
@@ -472,53 +400,51 @@ def fetch_zenodo(conn):
                 else:
                     lic = "CC-BY"
 
-                # Keywords
                 kws = ", ".join(meta.get("keywords", []))
 
-                # Files
-                file_names = [f.get("key","file") for f in rec.get("files", [])]
+                file_names = [f.get("key", "file") for f in rec.get("files", [])]
                 if not file_names:
-                    # Try links
                     file_names = [doi.split("/")[-1] + ".zip"] if doi else ["dataset.zip"]
 
-                # Creators
-                creators = [{"name": c.get("name","Unknown"), "role":"AUTHOR"}
+                creators = [{"name": c.get("name", "Unknown"), "role": "AUTHOR"}
                             for c in meta.get("creators", [])]
 
-                url = f"https://zenodo.org/record/{rec.get('id','')}"
+                url = f"https://zenodo.org/record/{rec.get('id', '')}"
                 pid, ptype, cls = insert_project(
                     conn, repo, term, title, desc, url, doi,
-                    pub_date, file_names, lic, kws, creators, lang)
+                    pub_date, file_names, lic, kws, creators, lang
+                )
 
                 total += 1
-                print(f"     ✔ [{ptype}] {title[:55]}")
-
-            time.sleep(REQUEST_DELAY)
+                print(f" ✔ [{ptype}] {title[:55]}")
+                time.sleep(REQUEST_DELAY)
 
         except Exception as e:
-            print(f"     ❌ Error: {e}")
+            print(f" ❌ Error: {e}")
 
-    print(f"\n  ✅ Zenodo total inserted: {total}")
+    print(f"\n ✅ Zenodo total inserted: {total}")
     return total
 
+# =====================================================================
+# DATAVERSE API (dataverse.no + ADA API + uni-halle API fallback)
+# =====================================================================
+def is_bot_challenge_html(text):
+    lower = text.lower()
+    return any(token in lower for token in [
+        "are you a robot", "not a robot",
+        "making sure you're not a bot", "captcha", "altcha"
+    ])
 
-# =====================================================================
-# DATAVERSE API  (dataverse.no and uni-halle)
-# =====================================================================
 def fetch_dataverse(conn, repo):
-    """
-    Harvard Dataverse-compatible API used by dataverse.no and uni-halle.
-    https://guides.dataverse.org/en/latest/api/search.html
-    """
-    base  = repo["url"].rstrip('/') + "/api/search"
+    base = repo["url"].rstrip('/') + "/api/search"
     total = 0
 
     print(f"\n{'─'*60}")
     print(f"📦 DATAVERSE: {repo['name'].upper()}")
     print("─"*60)
 
-    for term in SEARCH_TERMS[:5]:   # fewer queries to avoid rate limit
-        print(f"\n  🔍 Query: '{term}'")
+    for term in SEARCH_TERMS[:5]:
+        print(f"\n 🔍 Query: '{term}'")
         try:
             params = {
                 "q": term,
@@ -528,41 +454,25 @@ def fetch_dataverse(conn, repo):
             }
             r = safe_get(base, params=params)
             if not r or r.status_code != 200:
-                print(f"     ⚠️  HTTP {r.status_code if r else 'timeout'}")
-                if repo['name'] == 'uni-halle' and HAS_PLAYWRIGHT:
-                    print("     🔄 Trying Playwright fallback for uni-halle...")
-                    data = fetch_dataverse_browser_search(repo, params)
-                    if data is None:
-                        print("     ❌ uni-halle fallback failed; skipping this query.")
-                        continue
-                else:
-                    continue
-            else:
-                try:
-                    data = r.json()
-                except Exception as e:
-                    print(f"     ⚠️ JSON parse failed: {e}")
-                    if repo['name'] == 'uni-halle' and HAS_PLAYWRIGHT:
-                        print("     🔄 Trying Playwright fallback for uni-halle...")
-                        data = fetch_dataverse_browser_search(repo, params)
-                        if data is None:
-                            print("     ❌ uni-halle fallback failed; skipping this query.")
-                            continue
-                    else:
-                        continue
+                print(f" ⚠️ HTTP {r.status_code if r else 'timeout'}")
+                continue
+            try:
+                data = r.json()
+            except Exception as e:
+                print(f" ⚠️ JSON parse failed: {e}")
+                continue
 
             items = data.get("data", {}).get("items", [])
-            print(f"     Found {len(items)} records")
+            print(f" Found {len(items)} records")
 
             for item in items:
-                title    = item.get("name", "Untitled")
-                desc     = item.get("description", "")
-                url      = item.get("url", "")
+                title = item.get("name", "Untitled")
+                desc = item.get("description", "")
+                url = item.get("url", "")
                 pub_date = item.get("published_at", "")[:10]
-
-                # Get files via dataset API
                 global_id = item.get("global_id", "")
                 file_names = []
+
                 try:
                     files_url = repo["url"].rstrip('/') + f"/api/datasets/:persistentId/?persistentId={global_id}"
                     fr = safe_get(files_url)
@@ -572,160 +482,358 @@ def fetch_dataverse(conn, repo):
                             fname = f.get("dataFile", {}).get("filename", "")
                             if fname:
                                 file_names.append(fname)
-                    time.sleep(0.3)
+                        time.sleep(0.3)
                 except Exception:
                     pass
 
                 if not file_names:
                     file_names = ["dataset.zip"]
 
-                lic      = item.get("license", "CC-BY")
-                kws      = ", ".join(item.get("subjects", []))
-                creators = [{"name": item.get("authors", ["Unknown"])[0]
-                              if item.get("authors") else "Unknown",
-                              "role": "AUTHOR"}]
+                lic = item.get("license", "CC-BY")
+                kws = ", ".join(item.get("subjects", []))
+                authors = item.get("authors") or []
+                first_author = authors[0] if authors else "Unknown"
+                creators = [{"name": first_author, "role": "AUTHOR"}]
 
                 pid, ptype, cls = insert_project(
                     conn, repo, term, title, desc, url, global_id,
-                    pub_date, file_names, lic, kws, creators)
+                    pub_date, file_names, lic, kws, creators
+                )
 
                 total += 1
-                print(f"     ✔ [{ptype}] {title[:55]}")
-
-            time.sleep(REQUEST_DELAY)
+                print(f" ✔ [{ptype}] {title[:55]}")
+                time.sleep(REQUEST_DELAY)
 
         except Exception as e:
-            print(f"     ❌ Error: {e}")
+            print(f" ❌ Error: {e}")
 
-    print(f"\n  ✅ {repo['name']} total inserted: {total}")
+    print(f"\n ✅ {repo['name']} total inserted: {total}")
     return total
 
-
 # =====================================================================
-# GITHUB API
+# ADA HTML (from ada-und-opendata.py)
 # =====================================================================
-def fetch_github(conn):
-    """
-    GitHub Search API - finds real QDA/qualitative research repositories.
-    With token: 5000 req/hr. Without: 60 req/hr (set GITHUB_TOKEN above).
-    """
-    repo  = {"id": 7, "name": "github", "url": "https://github.com/"}
-    base  = "https://api.github.com/search/repositories"
-    total = 0
+def is_challenge_page(html_or_text):
+    low = (html_or_text or "").lower()
+    return any(marker in low for marker in CHALLENGE_MARKERS)
 
-    print(f"\n{'─'*60}")
-    print("📦 GITHUB API")
-    print("─"*60)
-
-    gh_terms = [
-        "qdpx qualitative",
-        "refi-qda",
-        "nvivo qualitative research",
-        "qualitative data analysis interview transcript",
-        "atlas.ti qualitative",
-        "thematic analysis interview dataset",
-        "mqda qualitative",
-    ]
-
-    for term in gh_terms:
-        print(f"\n  🔍 Query: '{term}'")
+def wait_until_past_challenge(page, max_wait_s=CHALLENGE_MAX_WAIT_S):
+    waited = 0
+    told_user = False
+    while waited < max_wait_s:
         try:
-            params = {
-                "q": term,
-                "per_page": min(MAX_PER_QUERY, 30),
-                "sort": "updated",
-                "order": "desc",
-            }
-            r = safe_get(base, params=params, headers=GH_HEADERS)
-            if not r or r.status_code != 200:
-                msg = r.json().get('message','') if r else 'timeout'
-                print(f"     ⚠️  {msg}")
-                time.sleep(10)
+            html = page.content()
+        except Exception:
+            page.wait_for_timeout(CHALLENGE_POLL_S * 1000)
+            waited += CHALLENGE_POLL_S
+            continue
+
+        if not is_challenge_page(html):
+            return True
+
+        if not told_user:
+            print(" ⚠️ یک صفحه‌ی تایید ربات/کپچا نشون داده شده.")
+            print(" لطفاً توی پنجره‌ی مرورگر بازشده، تیک/چالش رو حل کنید.")
+            print(f" اسکریپت تا {max_wait_s} ثانیه صبر می‌کنه...")
+            told_user = True
+
+        page.wait_for_timeout(CHALLENGE_POLL_S * 1000)
+        waited += CHALLENGE_POLL_S
+
+    print(f" ❌ بعد از {max_wait_s} ثانیه، هنوز صفحه‌ی چالش باز بود.")
+    return False
+
+def fetch_json(page, url):
+    try:
+        page.goto(url, wait_until="networkidle", timeout=30000)
+        text = page.evaluate("() => document.body.innerText")
+        return json.loads(text) if text else None
+    except Exception:
+        return None
+
+def extract_ada_results_from_html(html):
+    soup = BeautifulSoup(html, "html.parser")
+    results = []
+    seen = set()
+
+    for a in soup.select("a[href*='dataset.xhtml']"):
+        href = a.get("href", "")
+        title = clean_text(a.get_text(" ", strip=True))
+        if not href or href in seen:
+            continue
+        seen.add(href)
+
+        full_url = urllib.parse.urljoin("https://dataverse.ada.edu.au/", href)
+        qs = urllib.parse.parse_qs(urllib.parse.urlparse(full_url).query)
+        persistent_id = (qs.get("persistentId") or [""])[0]
+
+        results.append({
+            "title": title or "Untitled",
+            "url": full_url,
+            "persistent_id": persistent_id,
+        })
+
+    return results
+
+def fetch_ada_html_and_insert(conn):
+    if not HAS_PLAYWRIGHT:
+        print("⚠️ Playwright not available; skipping ADA HTML fetch.")
+        return 0
+
+    repo = REPO_ADA_HTML
+    print("\n" + "=" * 60)
+    print(f"📦 {repo['name'].upper()} (Dataverse UI search, headless HTML)")
+    print("=" * 60)
+
+    grand_total = 0
+    seen_urls = set()
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        context = browser.new_context(user_agent=HEADERS["User-Agent"])
+        page = context.new_page()
+
+        for term in SEARCH_TERMS:
+            print("-" * 60)
+            print(f"🔍 Query: '{term}'")
+
+            search_url = repo["search_base"] + urllib.parse.quote(term)
+            try:
+                page.goto(search_url, wait_until="domcontentloaded", timeout=45000)
+            except Exception as e:
+                print(" ⚠️ navigation failed:", e)
                 continue
+            page.wait_for_timeout(PAGE_WAIT_MS)
 
-            items = r.json().get("items", [])
-            remaining = int(r.headers.get('X-RateLimit-Remaining', 0))
-            print(f"     Found {len(items)} repos | API remaining: {remaining}")
+            html = page.content()
+            results = extract_ada_results_from_html(html)
+            print(f" Found {len(results)} records")
 
-            for item in items:
-                title = item.get("name", "")
-                desc  = item.get("description", "") or ""
-                url   = item.get("html_url", "")
-                lang  = item.get("language", "") or "unknown"
-                stars = item.get("stargazers_count", 0)
-                updated = item.get("updated_at", "")[:10]
+            for r in results[:MAX_ITEMS_HTML]:
+                if r["url"] in seen_urls:
+                    continue
+                seen_urls.add(r["url"])
 
-                lic_info = item.get("license") or {}
-                lic = lic_info.get("spdx_id", "none")
-                if lic in ("NOASSERTION", "none", ""):
-                    lic = "unknown"
+                title = r["title"]
+                desc, pub_date, file_names = "", "", []
 
-                # Get file listing (costs 1 API call per repo)
-                file_names = []
-                if remaining > 10:
-                    try:
-                        owner = item.get("owner", {}).get("login", "")
-                        fr = safe_get(
-                            f"https://api.github.com/repos/{owner}/{title}/contents/",
-                            headers=GH_HEADERS)
-                        if fr and fr.status_code == 200:
-                            contents = fr.json()
-                            if isinstance(contents, list):
-                                file_names = [f["name"] for f in contents
-                                              if f.get("type") == "file"]
-                        remaining -= 1
-                        time.sleep(0.5)
-                    except Exception:
-                        pass
+                if r["persistent_id"]:
+                    api_url = (
+                        repo["dataset_api"]
+                        + "?persistentId=" + urllib.parse.quote(r["persistent_id"])
+                    )
+                    fdata = fetch_json(page, api_url)
+                    if fdata:
+                        latest = fdata.get("data", {}).get("latestVersion", {})
+                        meta = latest.get("metadataBlocks", {}).get("citation", {}).get("fields", [])
+                        for f in meta:
+                            if f.get("typeName") == "dsDescription":
+                                try:
+                                    desc = f["value"][0]["dsDescriptionValue"]["value"]
+                                except Exception:
+                                    pass
+                        pub_date = (fdata.get("data", {}).get("publicationDate") or "")[:10]
+                        for f in latest.get("files", []):
+                            fname = f.get("dataFile", {}).get("filename", "")
+                            if fname:
+                                file_names.append(fname)
 
                 if not file_names:
-                    # Guess from name/description
-                    for ext in ['.qdpx','.pdf','.docx','.txt','.csv']:
-                        if ext.strip('.') in desc.lower() or ext.strip('.') in title.lower():
-                            file_names.append(f"data{ext}")
-                            break
-                    if not file_names:
-                        file_names = ["README.md"]
+                    file_names = ["unknown_file"]
 
-                topics = item.get("topics", [])
-                kws = ", ".join(topics) if topics else term
+                license_str = "CC-BY"
+                keywords = ""
+                creators = [{"name": "Unknown", "role": "AUTHOR"}]
+                doi = r.get("persistent_id", "")
 
-                owner_name = item.get("owner", {}).get("login", "Unknown")
-                creators = [{"name": owner_name, "role": "AUTHOR"}]
+                try:
+                    pid, ptype, cls = insert_project(
+                        conn,
+                        repo,
+                        term,
+                        title,
+                        desc,
+                        r["url"],
+                        doi,
+                        pub_date,
+                        file_names,
+                        license_str,
+                        keywords,
+                        creators,
+                        "en"
+                    )
+                    grand_total += 1
+                    print(f" ✔ [{ptype}] {title[:65]}")
+                except Exception as e:
+                    print(" ❌ insert failed:", e)
 
-                pid, ptype, cls = insert_project(
-                    conn, repo, term, title, desc, url, "",
-                    updated, file_names, lic, kws, creators, lang)
+        browser.close()
 
-                total += 1
-                print(f"     ✔ [{ptype}] {title[:55]}  ⭐{stars}")
-
-            time.sleep(REQUEST_DELAY * 2)   # GitHub is strict
-
-        except Exception as e:
-            print(f"     ❌ Error: {e}")
-
-    print(f"\n  ✅ GitHub total inserted: {total}")
-    return total
-
+    print(f"\n ✅ ADA HTML total inserted: {grand_total}")
+    return grand_total
 
 # =====================================================================
-# STEP 4c – Excel export (exact columns from PDF spec)
+# UNI-HALLE HTML (from ada-und-opendata.py)
+# =====================================================================
+def extract_uni_halle_items_from_html(html, base_url):
+    soup = BeautifulSoup(html, "html.parser")
+    items = []
+
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+        text = clean_text(a.get_text(" ", strip=True))
+        if not text:
+            continue
+        full_url = urllib.parse.urljoin(base_url, href)
+        if ("/handle/" in href) or ("/bitstream/" in href):
+            items.append({"title": text, "url": full_url})
+
+    uniq, seen = [], set()
+    for item in items:
+        if item["url"] not in seen:
+            seen.add(item["url"])
+            uniq.append(item)
+    return uniq
+
+def fetch_uni_halle_html_and_insert(conn):
+    repo = REPO_UNI_HALLE
+    print("\n" + "=" * 60)
+    print(f"📦 {repo['name'].upper()} (DSpace, visible browser - clear the challenge)")
+    print("=" * 60)
+
+    os.makedirs(BROWSER_PROFILE_DIR, exist_ok=True)
+    grand_total = 0
+    seen_urls = set()
+
+    if not HAS_PLAYWRIGHT:
+        print("⚠️ Playwright not available; skipping uni-halle HTML fetch.")
+        return 0
+
+    with sync_playwright() as p:
+        context = p.chromium.launch_persistent_context(
+            BROWSER_PROFILE_DIR,
+            headless=False,
+            viewport={"width": 1440, "height": 900},
+            user_agent=HEADERS["User-Agent"],
+        )
+        context.add_init_script(
+            "Object.defineProperty(navigator, 'webdriver', {get: () => undefined});"
+        )
+
+        page = context.new_page()
+        page.goto(repo["url"], wait_until="domcontentloaded", timeout=45000)
+        if not wait_until_past_challenge(page):
+            context.close()
+            return 0
+        page.wait_for_timeout(1000)
+        page.close()
+        print(" ✅ رد شدن از چالش اولیه انجام شد؛ حالا جستجوها اجرا می‌شن.\n")
+
+        for term in SEARCH_TERMS:
+            search_url = repo["search_base"] + urllib.parse.quote(term)
+            print("-" * 60)
+            print(f"🔍 Query: '{term}'")
+
+            page = context.new_page()
+            try:
+                page.goto(search_url, wait_until="domcontentloaded", timeout=45000)
+            except Exception as e:
+                print(" ⚠️ navigation failed:", e)
+                page.close()
+                continue
+
+            if not wait_until_past_challenge(page, max_wait_s=60):
+                page.close()
+                continue
+
+            page.wait_for_timeout(PAGE_WAIT_MS)
+            try:
+                page.mouse.wheel(0, 2000)
+                page.wait_for_timeout(1000)
+            except Exception:
+                pass
+
+            html = page.content()
+            page.close()
+
+            items = extract_uni_halle_items_from_html(html, search_url)
+            print(f" Found {len(items)} records")
+
+            for item in items[:MAX_ITEMS_HTML]:
+                title, url = item["title"], item["url"]
+                if url in seen_urls:
+                    continue
+                seen_urls.add(url)
+
+                desc, pubdate = "", ""
+                file_names = []
+
+                try:
+                    dpage = context.new_page()
+                    dpage.goto(url, wait_until="domcontentloaded", timeout=45000)
+                    if not wait_until_past_challenge(dpage, max_wait_s=60):
+                        dpage.close()
+                        continue
+                    dpage.wait_for_timeout(1500)
+                    dhtml = dpage.content()
+                    dsoup = BeautifulSoup(dhtml, "html.parser")
+
+                    meta_desc = dsoup.find("meta", attrs={"name": "description"})
+                    if meta_desc and meta_desc.get("content"):
+                        desc = clean_text(meta_desc["content"])
+                    else:
+                        desc = clean_text(dsoup.get_text(" ", strip=True))[:300]
+
+                    m = re.search(r"\b(19|20)\d{2}\b", desc)
+                    if not m:
+                        m = re.search(r"\b(19|20)\d{2}\b", clean_text(dsoup.get_text(" ", strip=True)))
+                    if m:
+                        pubdate = m.group(0)
+
+                    file_names = [
+                        clean_text(fa.get_text(strip=True))
+                        for fa in dsoup.select("a[href*='/bitstream/']")
+                        if clean_text(fa.get_text(strip=True))
+                    ] or ["unknown_file"]
+
+                    license_str = "unknown"
+                    keywords = ""
+                    creators = [{"name": "Unknown", "role": "AUTHOR"}]
+                    doi = ""
+
+                    insert_project(
+                        conn, repo, term, title, desc, url, doi,
+                        pubdate, file_names, license_str, keywords, creators
+                    )
+                    grand_total += 1
+                    print(f" ✔ {title[:70]}")
+
+                    dpage.close()
+                except Exception as e:
+                    print(" skip:", title[:70], "-", e)
+
+        context.close()
+
+    print(f"\n ✅ {repo['name']} HTML total inserted: {grand_total}")
+    return grand_total
+
+# =====================================================================
+# EXCEL و PDF – طبق پاورپوینت
 # =====================================================================
 def export_excel(db_path, out_path):
     conn = sqlite3.connect(db_path)
     df = pd.read_sql_query('''
-        SELECT
-            P.repository_id,
-            P.type                       AS project_type,
-            P.title                      AS project_title,
-            P.primary_class,
-            COALESCE(P.secondary_class,"") AS secondary_class,
-            COUNT(F.id)                  AS no_project_files
-        FROM PROJECTS P
-        LEFT JOIN FILES F ON F.project_id = P.id
-        GROUP BY P.id
-        ORDER BY P.repository_id, P.type, P.title
+    SELECT
+        P.repository_id,
+        P.type AS project_type,
+        P.title AS project_title,
+        P.primary_class,
+        COALESCE(P.secondary_class,"") AS secondary_class,
+        COUNT(F.id) AS no_project_files
+    FROM PROJECTS P
+    LEFT JOIN FILES F ON F.project_id = P.id
+    GROUP BY P.id
+    ORDER BY P.repository_id, P.type, P.title
     ''', conn)
     conn.close()
     with pd.ExcelWriter(out_path, engine='openpyxl') as w:
@@ -736,239 +844,98 @@ def export_excel(db_path, out_path):
                 len(str(col[0].value)) + 2,
                 max((len(str(c.value)) for c in col if c.value), default=10)
             )
-    print(f"\n📊 Excel → {out_path}  ({len(df)} rows)")
+    print(f"\n📊 Excel → {out_path} ({len(df)} rows)")
     return df
 
-
-# =====================================================================
-# STEP 4d – PDF Report
-# =====================================================================
-def find_font(candidates):
-    for p in candidates:
-        if os.path.exists(p):
-            return p
-    return None
-
-FONT_PATHS = {
-    "regular": [
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
-        "C:/Windows/Fonts/arial.ttf",
-        "/Library/Fonts/Arial.ttf",
-        "/System/Library/Fonts/Helvetica.ttc",
-    ],
-    "bold": [
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
-        "C:/Windows/Fonts/arialbd.ttf",
-        "/Library/Fonts/Arial Bold.ttf",
-    ],
-    "italic": [
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Italic.ttf",
-        "C:/Windows/Fonts/ariali.ttf",
-        "/Library/Fonts/Arial Italic.ttf",
-    ],
-}
-
-
-class Report(FPDF):
-    def __init__(self, font_name):
-        super().__init__()
-        self._fn = font_name
-
-    def header(self):
-        self.set_font(self._fn, 'B', 11)
-        self.cell(0, 9, 'Phase 2: Data Classification & Repository Metrics Report',
-                  align='C', ln=1)
-        self.set_font(self._fn, 'I', 8)
-        self.cell(0, 5,
-                  f'Student ID: {STUDENT_ID}  |  Generated: {datetime.now():%Y-%m-%d}',
-                  border='B', align='C', ln=1)
-        self.ln(3)
-
-    def footer(self):
-        self.set_y(-13)
-        self.set_font(self._fn, 'I', 8)
-        self.cell(0, 8, f'Page {self.page_no()}', align='C')
-
-
-def make_histogram(repo_name, class_counts, out_png):
-    """Vector-quality 300 DPI PNG histogram (Step 4d requirement)."""
-    items  = sorted(class_counts.items(), key=lambda x: x[1], reverse=True)[:20]
-    if not items:
-        return False
-    labels = [it[0] for it in items]
-    counts = [it[1] for it in items]
-
-    # Shorten labels for readability
-    short = []
-    for lbl in labels:
-        # "Sec M / Div 72 - Scientific research..." → "Div72 Scientific research..."
-        m = re.search(r'Div (\d+) - (.+)', lbl)
-        short.append(f"D{m.group(1)}: {m.group(2)[:28]}" if m else lbl[:32])
-
-    fig, ax = plt.subplots(figsize=(12, 5))
-    bars = ax.bar(range(len(short)), counts,
-                  color='#1a3a6b', edgecolor='#0d1f3c', width=0.6)
-    for bar, cnt in zip(bars, counts):
-        ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 0.05,
-                str(int(cnt)), ha='center', va='bottom', fontsize=8, fontweight='bold')
-
-    ax.set_xticks(range(len(short)))
-    ax.set_xticklabels(short, rotation=35, ha='right', fontsize=7)
-    ax.yaxis.set_major_locator(ticker.MaxNLocator(integer=True))
-    ax.set_xlabel("ISIC Rev.5 Division", fontsize=9)
-    ax.set_ylabel("Project Count",       fontsize=9)
-    ax.set_title(f"Primary ISIC Classes - Repository: {repo_name.upper()}",
-                 fontsize=11, fontweight='bold')
-    ax.set_ylim(0, max(counts) * 1.25)
-    ax.grid(axis='y', linestyle='--', alpha=0.4)
-    plt.tight_layout()
-    fig.savefig(out_png, dpi=300, format='png', bbox_inches='tight')
-    plt.close(fig)
-    return True
-
-
 def generate_pdf(db_path, pdf_path, base_dir):
-    # Find a Unicode font
-    fn   = "Liberation"
-    reg  = find_font(FONT_PATHS["regular"])
-    bold = find_font(FONT_PATHS["bold"])
-    ita  = find_font(FONT_PATHS["italic"])
-
-    pdf = Report(fn)
-    if reg:
-        pdf.add_font(fn, "",  reg, uni=True)
-        pdf.add_font(fn, "B", bold or reg, uni=True)
-        pdf.add_font(fn, "I", ita  or reg, uni=True)
-    else:
-        fn = "helvetica"   # fallback (ASCII only)
-
-    pdf.set_auto_page_break(auto=True, margin=15)
-    pdf.add_page()
-
     conn = sqlite3.connect(db_path)
-    cur  = conn.cursor()
+    c = conn.cursor()
 
-    # ── Executive summary ──────────────────────────────────────────
-    pdf.set_font(fn, 'B', 13)
-    pdf.cell(0, 9, "1. Executive Summary", ln=1)
-    pdf.set_font(fn, '', 10)
-    cur.execute("SELECT COUNT(*) FROM PROJECTS")
-    total_projects = cur.fetchone()[0]
-    cur.execute("SELECT COUNT(DISTINCT repository_id) FROM PROJECTS")
-    n_repos = cur.fetchone()[0]
-    pdf.multi_cell(0, 6,
-        f"This report presents Phase 2 classification results for {total_projects} "
-        f"real research projects collected from {n_repos} repositories via live API calls. "
-        "Projects are classified by PROJECT_TYPE (Step 1) and mapped to the UN ISIC Rev.5 "
-        "standard at two hierarchical levels: Section and Division (Step 2).")
-    pdf.ln(4)
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    fn = "Helvetica"
 
-    # ── Step 4b overview table ─────────────────────────────────────
-    pdf.set_font(fn, 'B', 12)
-    pdf.cell(0, 9, "2. Repository Overview - Project Type Distribution (Step 4b)",
-             ln=1)
-
-    cur.execute("""
-        SELECT download_repository_folder, type, COUNT(*) c
-        FROM PROJECTS GROUP BY download_repository_folder, type
-        ORDER BY download_repository_folder, type
-    """)
-    rows = cur.fetchall()
-
-    widths = [55, 50, 35, 40]
-    pdf.set_font(fn, 'B', 9)
-    for h, w in zip(["Repository","Project Type","Count","Dominant Class"], widths):
-        pdf.cell(w, 7, h, border=1, align='C')
-    pdf.ln()
-    pdf.set_font(fn, '', 8)
-    for rname, ptype, cnt in rows:
-        cur.execute("""SELECT primary_class FROM PROJECTS
-                       WHERE download_repository_folder=? AND type=?
-                       GROUP BY primary_class ORDER BY COUNT(*) DESC LIMIT 1""",
-                    (rname, ptype))
-        dom = cur.fetchone()
-        dom_label = (dom[0] or '')[:38] if dom else ''
-        pdf.cell(widths[0], 6, str(rname),     border=1)
-        pdf.cell(widths[1], 6, str(ptype),     border=1)
-        pdf.cell(widths[2], 6, str(cnt),        border=1, align='C')
-        pdf.cell(widths[3], 6, dom_label[:38], border=1)
-        pdf.ln()
-    pdf.ln(6)
-
-    # ── Per-repository sections (Step 4d) ─────────────────────────
-    pdf.set_font(fn, 'B', 12)
-    pdf.cell(0, 9, "3. Per-Repository Classification Details (Step 4d)",
-             ln=1)
-    pdf.ln(2)
-
-    cur.execute("SELECT DISTINCT repository_id, download_repository_folder FROM PROJECTS ORDER BY repository_id")
-    repos = cur.fetchall()
+    c.execute('SELECT DISTINCT repository_id, download_repository_folder FROM PROJECTS ORDER BY repository_id')
+    repos = c.fetchall()
 
     for repo_id, repo_folder in repos:
-        cur.execute("""SELECT primary_class, COUNT(*) c FROM PROJECTS
-                       WHERE repository_id=? GROUP BY primary_class ORDER BY c DESC""",
-                    (repo_id,))
-        class_rows = cur.fetchall()
-        if not class_rows:
+        pdf.add_page()
+        pdf.set_font(fn, 'B', 14)
+        pdf.cell(0, 10, f"Repository {repo_folder} (ID {repo_id})", ln=1)
+
+        c.execute('''
+        SELECT primary_class, COUNT(*) AS cnt
+        FROM PROJECTS
+        WHERE repository_id = ?
+        GROUP BY primary_class
+        ORDER BY cnt DESC
+        ''', (repo_id,))
+        rows = c.fetchall()
+        if not rows:
+            pdf.set_font(fn, '', 10)
+            pdf.cell(0, 6, "No classified projects for this repository.", ln=1)
             continue
-        class_counts = {r[0]: r[1] for r in class_rows}
-        dominant     = class_rows[0][0]
 
-        # Section header
-        pdf.set_font(fn, 'B', 11)
-        pdf.set_fill_color(220, 230, 245)
-        pdf.cell(0, 8,
-                 f"Repository: {repo_folder.upper()}  (ID: {repo_id})",
-                 border=1, fill=True, ln=1)
-        pdf.ln(2)
+        classes = [r[0] for r in rows]
+        counts = [r[1] for r in rows]
+        dominant = classes[0]
 
-        # a) Histogram
-        chart_path = os.path.join(base_dir, f"_tmp_hist_{repo_folder}.png")
-        if make_histogram(repo_folder, class_counts, chart_path):
-            pdf.image(chart_path, x=10, w=190)
-            pdf.ln(2)
-            os.remove(chart_path)
+        fig, ax = plt.subplots(figsize=(8, 3))
+        ax.bar(range(len(classes)), counts)
+        ax.set_xticks(range(len(classes)))
+        ax.set_xticklabels(classes, rotation=60, ha='right', fontsize=6)
+        ax.set_ylabel("Count")
+        ax.set_title("Histogram of primary classes")
 
-        # b) Top-20 rank-ordered table
-        pdf.set_font(fn, 'B', 9)
-        pdf.cell(10,  7, "#",     border=1, align='C')
-        pdf.cell(148, 7, "ISIC Rev.5 Division (primary class)", border=1, align='C')
-        pdf.cell(32,  7, "Count", border=1, align='C')
+        for i, v in enumerate(counts):
+            ax.text(i, v + 0.1, str(v), ha='center', va='bottom', fontsize=6)
+
+        ax.yaxis.set_major_locator(ticker.MaxNLocator(integer=True))
+        fig.tight_layout()
+        hist_path = os.path.join(base_dir, f"hist_repo_{repo_id}.png")
+        fig.savefig(hist_path, dpi=200)
+        plt.close(fig)
+
+        pdf.image(hist_path, w=180)
+        pdf.ln(5)
+
+        pdf.set_font(fn, 'B', 10)
+        pdf.cell(0, 6, "Top classes (rank-ordered):", ln=1)
+        pdf.set_font(fn, '', 9)
+
+        pdf.cell(100, 6, "Class", border=1)
+        pdf.cell(30, 6, "Count", border=1)
         pdf.ln()
-        pdf.set_font(fn, '', 8)
-        for rank, (cls, cnt) in enumerate(
-                sorted(class_counts.items(), key=lambda x: x[1], reverse=True)[:20], 1):
-            pdf.cell(10,  6, str(rank),      border=1, align='C')
-            pdf.cell(148, 6, str(cls)[:98],  border=1)
-            pdf.cell(32,  6, str(cnt),        border=1, align='C')
+        for (cls_name, cnt) in rows[:20]:
+            pdf.cell(100, 6, cls_name[:80], border=1)
+            pdf.cell(30, 6, str(cnt), border=1)
             pdf.ln()
-        pdf.ln(3)
 
-        # c) Comments
-        total_r = sum(class_counts.values())
+        total_r = sum(counts)
         pdf.set_font(fn, 'B', 9)
         pdf.cell(0, 5, "Comments on Findings:", ln=1)
         pdf.set_font(fn, 'I', 9)
-        pdf.multi_cell(0, 5,
+        pdf.multi_cell(
+            0, 5,
             f"Repository '{repo_folder.upper()}' contributed {total_r} classified project(s) "
-            f"across {len(class_counts)} ISIC division(s). "
+            f"across {len(classes)} ISIC division(s). "
             f"Dominant class: {dominant}. "
             "Classification was performed at two ISIC Rev.5 levels (Section + Division) "
-            "using keyword analysis on real metadata fetched from the live API. "
-            "PROJECT_TYPE was derived from actual file extensions in each dataset.")
+            "using keyword analysis on real metadata fetched from the live APIs/HTML pages. "
+            "PROJECT_TYPE was derived from actual file extensions in each dataset."
+        )
         pdf.ln(8)
 
     pdf.output(pdf_path)
     conn.close()
-    print(f"📄 PDF  → {pdf_path}")
-
+    print(f"📄 PDF → {pdf_path}")
 
 # =====================================================================
 # MAIN
 # =====================================================================
 if __name__ == "__main__":
     print("\n" + "="*65)
-    print(f"  SQ26 PHASE 2 - REAL DATA COLLECTOR  |  Student: {STUDENT_ID}")
+    print(f" SQ26 PHASE 2 - REAL DATA COLLECTOR | Student: {STUDENT_ID}")
     print("="*65)
 
     base_dir = resolve_output_dir()
@@ -985,37 +952,36 @@ if __name__ == "__main__":
     grand_total += fetch_zenodo(conn)
 
     # ── Dataverse-NO ────────────────────────────────────────────────
-    repo_dvno = {"id": 6, "name": "dataverse-no", "url": "https://dataverse.no/"}
-    grand_total += fetch_dataverse(conn, repo_dvno)
-    # ── ADA (Dataverse node) ──────────────────────────────────────────
-    repo_ada = {"id": 7, "name": "ada", "url": "https://dataverse.ada.edu.au/"}
-    grand_total += fetch_dataverse(conn, repo_ada)
-    # ── Uni-Halle (interactive verification) ─────────────────────────
-    repo_halle = {"id": 16, "name": "uni-halle", "url": "https://opendata.uni-halle.de/"}
-    print("\n  ⚠️  Attempting uni-halle. If a browser window appears, please complete the 'I'm not a robot' check.")
-    grand_total += fetch_dataverse(conn, repo_halle)
+    grand_total += fetch_dataverse(conn, REPO_DATAVERSE_NO)
+
+    # ── ADA (Dataverse API) ─────────────────────────────────────────
+    grand_total += fetch_dataverse(conn, REPO_ADA_API)
+
+    # ── ADA HTML UI ────────────────────────────────────────────────
+    grand_total += fetch_ada_html_and_insert(conn)
+
+    # ── Uni-Halle HTML ─────────────────────────────────────────────
+    print("\n ⚠️ Attempting uni-halle (HTML). If a browser window appears, please complete the 'I'm not a robot' check.")
+    grand_total += fetch_uni_halle_html_and_insert(conn)
 
     conn.close()
 
     print(f"\n{'='*65}")
-    print(f"  TOTAL REAL PROJECTS COLLECTED: {grand_total}")
+    print(f" TOTAL REAL PROJECTS COLLECTED: {grand_total}")
     print(f"{'='*65}")
 
-    # ── Excel (Step 4c) ─────────────────────────────────────────────
     export_excel(db_path, excel_path)
-
-    # ── PDF (Step 4d) ───────────────────────────────────────────────
     generate_pdf(db_path, pdf_path, base_dir)
 
     print(f"""
 ╔{'═'*63}╗
-║  DELIVERABLES READY                                           ║
+║ DELIVERABLES READY ║
 ╠{'═'*63}╣
-║  DB   (GitHub / tag classification-results):                  ║
-║    {db_path:<57} ║
-║  XLSX (moo.uni1.de):                                          ║
-║    {excel_path:<57} ║
-║  PDF  (moo.uni1.de):                                          ║
-║    {pdf_path:<57} ║
+║ DB (Git/tag classification-results):        ║
+║ {db_path:<57} ║
+║ XLSX (moo.uni1.de):                         ║
+║ {excel_path:<57} ║
+║ PDF (moo.uni1.de):                          ║
+║ {pdf_path:<57} ║
 ╚{'═'*63}╝
 """)
