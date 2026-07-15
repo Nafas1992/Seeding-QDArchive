@@ -1,6 +1,7 @@
 """
 Phase 2 - SQ26 Seeding QDArchive
-Real data collection from Zenodo, Dataverse-NO, ADA (HTML), Uni-Halle (HTML)
+Real data collection from Dataverse-NO, ADA (HTML), Uni-Halle (HTML)
+Student: Sakineh Mohebi
 Student ID: 23542421
 
 REQUIREMENTS (install once):
@@ -21,12 +22,15 @@ import pandas as pd
 from fpdf import FPDF
 from fpdf.enums import XPos, YPos
 from bs4 import BeautifulSoup
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
+from openpyxl.utils import get_column_letter
 
 from playwright.sync_api import sync_playwright
 
 # =====================================================================
-# ⚙️ CONFIGURATION
+# CONFIGURATION
 # =====================================================================
+STUDENT_NAME = "Sakineh Mohebi"
 STUDENT_ID = "23542421"
 CUSTOM_OUT_DIR = ""  # optional: set a fixed output folder
 
@@ -39,12 +43,12 @@ HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/122.0.0.0 Safari/537.36 SQ26-Seeder/1.0"
+        "Chrome/122.0.0.0 Safari/537.36"
     )
 }
 
 # =====================================================================
-# ISIC / FILE TYPES / SEARCH TERMS
+# ISIC Rev.5 — exactly matches the professor's Google Form dropdown options
 # =====================================================================
 ISIC = {
     "01": ("A", "Crop and animal production, hunting and related service activities"),
@@ -57,46 +61,83 @@ ISIC = {
     "09": ("B", "Mining support service activities"),
     "10": ("C", "Manufacture of food products"),
     "11": ("C", "Manufacture of beverages"),
+    "12": ("C", "Manufacture of tobacco products"),
     "13": ("C", "Manufacture of textiles"),
+    "14": ("C", "Manufacture of wearing apparel"),
+    "15": ("C", "Manufacture of leather and related products"),
+    "16": ("C", "Manufacture of wood and of products of wood and cork, except furniture; manufacture of articles of straw and plaiting materials"),
+    "17": ("C", "Manufacture of paper and paper products"),
+    "18": ("C", "Printing and reproduction of recorded media"),
+    "19": ("C", "Manufacture of coke and refined petroleum products"),
     "20": ("C", "Manufacture of chemicals and chemical products"),
-    "21": ("C", "Manufacture of pharmaceutical products"),
+    "21": ("C", "Manufacture of basic pharmaceutical products and pharmaceutical preparations"),
+    "22": ("C", "Manufacture of rubber and plastic products"),
+    "23": ("C", "Manufacture of other non-metallic mineral products"),
+    "24": ("C", "Manufacture of basic metals"),
+    "25": ("C", "Manufacture of fabricated metal products, except machinery and equipment"),
     "26": ("C", "Manufacture of computer, electronic and optical products"),
+    "27": ("C", "Manufacture of electrical equipment"),
     "28": ("C", "Manufacture of machinery and equipment n.e.c."),
+    "29": ("C", "Manufacture of motor vehicles, trailers and semi-trailers"),
+    "30": ("C", "Manufacture of other transport equipment"),
+    "31": ("C", "Manufacture of furniture"),
+    "32": ("C", "Other manufacturing"),
+    "33": ("C", "Repair, maintenance and installation of machinery and equipment"),
     "35": ("D", "Electricity, gas, steam and air conditioning supply"),
-    "38": ("E", "Waste collection, treatment and disposal activities"),
-    "41": ("F", "Construction of buildings"),
+    "36": ("E", "Water collection, treatment and supply"),
+    "37": ("E", "Sewerage"),
+    "38": ("E", "Waste collection, treatment and disposal, and recovery activities"),
+    "39": ("E", "Remediation and other waste management service activities"),
+    "41": ("F", "Construction of residential and non-residential buildings"),
     "42": ("F", "Civil engineering"),
-    "47": ("G", "Retail trade, except of motor vehicles and motorcycles"),
+    "43": ("F", "Specialized construction activities"),
+    "46": ("G", "Wholesale trade"),
+    "47": ("G", "Retail trade"),
+    "49": ("H", "Land transport and transport via pipelines"),
+    "50": ("H", "Water transport"),
+    "51": ("H", "Air transport"),
+    "52": ("H", "Warehousing and support activities for transportation"),
+    "53": ("H", "Postal and courier activities"),
     "55": ("I", "Accommodation"),
     "56": ("I", "Food and beverage service activities"),
     "58": ("J", "Publishing activities"),
-    "59": ("J", "Motion picture, video and television programme production"),
-    "61": ("J", "Telecommunications"),
-    "62": ("J", "Computer programming, consultancy and related activities"),
-    "63": ("J", "Information service activities"),
-    "64": ("K", "Financial service activities, except insurance and pension funding"),
-    "65": ("K", "Insurance, reinsurance and pension funding"),
-    "68": ("L", "Real estate activities"),
-    "69": ("M", "Legal and accounting activities"),
-    "70": ("M", "Activities of head offices; management consultancy activities"),
-    "71": ("M", "Architectural and engineering activities; technical testing"),
-    "72": ("M", "Scientific research and development"),
-    "73": ("M", "Advertising and market research"),
-    "74": ("M", "Other professional, scientific and technical activities"),
-    "75": ("M", "Veterinary activities"),
-    "78": ("N", "Employment activities"),
-    "82": ("N", "Office administrative, office support and other business support"),
-    "84": ("O", "Public administration and defence; compulsory social security"),
-    "85": ("P", "Education"),
-    "86": ("Q", "Human health activities"),
-    "87": ("Q", "Residential care activities"),
-    "88": ("Q", "Social work activities without accommodation"),
-    "90": ("R", "Creative, arts and entertainment activities"),
-    "91": ("R", "Libraries, archives, museums and other cultural activities"),
-    "93": ("R", "Sports activities and amusement and recreation activities"),
-    "94": ("S", "Activities of membership organisations"),
-    "96": ("S", "Other personal service activities"),
-    "99": ("U", "Activities of extraterritorial organisations and bodies"),
+    "59": ("J", "Motion picture, video and television programme production, sound recording and music publishing activities"),
+    "60": ("J", "Programming, broadcasting, news agency and other content distribution activities"),
+    "61": ("K", "Telecommunications"),
+    "62": ("K", "Computer programming, consultancy and related activities"),
+    "63": ("K", "Computing infrastructure, data processing, hosting, and other information service activities"),
+    "64": ("L", "Financial service activities, except insurance and pension funding"),
+    "65": ("L", "Insurance, reinsurance and pension funding, except compulsory social security"),
+    "66": ("L", "Activities auxiliary to financial service and insurance activities"),
+    "68": ("M", "Real estate activities"),
+    "69": ("N", "Legal and accounting activities"),
+    "70": ("N", "Activities of head offices; management consultancy activities"),
+    "71": ("N", "Architectural and engineering activities; technical testing and analysis"),
+    "72": ("N", "Scientific research and development"),
+    "73": ("N", "Activities of advertising, market research and public relations"),
+    "74": ("N", "Other professional, scientific and technical activities"),
+    "75": ("N", "Veterinary activities"),
+    "77": ("O", "Rental and leasing activities"),
+    "78": ("O", "Employment activities"),
+    "79": ("O", "Travel agency, tour operator, and other travel related activities"),
+    "80": ("O", "Investigation and security activities"),
+    "81": ("O", "Services to buildings and landscape activities"),
+    "82": ("O", "Office administrative, office support and other business support activities"),
+    "84": ("P", "Public administration and defence; compulsory social security"),
+    "85": ("Q", "Education"),
+    "86": ("R", "Human health activities"),
+    "87": ("R", "Residential care activities"),
+    "88": ("R", "Social work activities without accommodation"),
+    "90": ("S", "Arts creation and performing arts activities"),
+    "91": ("S", "Library, archives, museum and other cultural activities"),
+    "92": ("S", "Gambling and betting activities"),
+    "93": ("S", "Sports activities and amusement and recreation activities"),
+    "94": ("T", "Activities of membership organizations"),
+    "95": ("T", "Repair and maintenance of computers, personal and household goods, and motor vehicles and motorcycles"),
+    "96": ("T", "Personal service activities"),
+    "97": ("U", "Activities of households as employers of domestic personnel"),
+    "98": ("U", "Undifferentiated goods- and services-producing activities of private households for own use"),
+    "99": ("V", "Activities of extraterritorial organizations and bodies"),
 }
 
 QDA_EXTENSIONS = {
@@ -109,23 +150,19 @@ PRIMARY_EXTENSIONS = {
     '.csv', '.xlsx', '.xls', '.tsv'
 }
 
-# عمومی برای Dataverse و Uni-Halle
 SEARCH_TERMS = [
     "qdpx", "mqda", "refi-qda", "qualitative data analysis",
     "interview transcript qualitative", "nvivo qualitative",
     "atlas.ti qualitative", "thematic analysis interview"
 ]
 
-# مخصوص ADA
-ADA_SEARCH_TERMS = ["qdpx", "mqda", "interview study"]
-
-# برای Zenodo
-ZENODO_SEARCH_TERMS = ["qdpx", "mqda", "qualitative data analysis"]
+# ADA now uses the same 8 broad keywords that Uni-Halle uses
+# (previously only 3: qdpx / mqda / interview study)
+ADA_SEARCH_TERMS = SEARCH_TERMS
 
 # =====================================================================
 # REPOS
 # =====================================================================
-REPO_ZENODO = {"id": 1, "name": "zenodo", "url": "https://zenodo.org/"}
 REPO_DATAVERSE_NO = {"id": 6, "name": "dataverse-no", "url": "https://dataverse.no/"}
 REPO_ADA_HTML = {
     "id": 7,
@@ -260,7 +297,7 @@ def derive_project_type(files):
 def isic_label(code):
     if code in ISIC:
         sec, name = ISIC[code]
-        return f"Sec {sec} / Div {code} - {name}"
+        return f"{sec}{code} - {code} - {name}"
     return f"Div {code} - Unknown"
 
 def classify_isic(title, desc, keywords, ptype):
@@ -355,122 +392,12 @@ def insert_project(conn, repo, query, title, desc, url, doi,
     return pid, ptype, pri_label
 
 # =====================================================================
-# ZENODO
-# =====================================================================
-def fetch_zenodo(conn):
-    repo = REPO_ZENODO
-    base = "https://zenodo.org/api/records"
-    total = 0
-
-    print("\n" + "─"*60)
-    print("📦 ZENODO API")
-    print("─"*60)
-
-    for term in ZENODO_SEARCH_TERMS:
-        print(f"\n 🔍 Query: '{term}'")
-
-        data = None
-
-        params_primary = {
-            "q": term,
-            "size": MAX_PER_QUERY,
-            "sort": "bestmatch",
-        }
-        try:
-            r = requests.get(base, params=params_primary, headers=HEADERS, timeout=30)
-            if not r or r.status_code != 200:
-                print(f" ⚠️ HTTP {r.status_code if r else 'timeout'} (primary)")
-            else:
-                d = r.json()
-                hits_found = d.get("hits", {}).get("hits", [])
-                if hits_found:
-                    data = d
-                else:
-                    print(" ⚠️ Primary query returned 0 hits, retrying with alternate sort...")
-        except Exception as e:
-            print(f" ⚠️ Primary request failed ({type(e).__name__}): {e}")
-
-        if data is None:
-            params_fallback = {
-                "q": term,
-                "size": MAX_PER_QUERY,
-                "sort": "mostrecent",
-            }
-            try:
-                print(" 🔄 Retrying with fallback parameters...")
-                r = requests.get(base, params=params_fallback, headers=HEADERS, timeout=30)
-                if not r or r.status_code != 200:
-                    print(f" ⚠️ HTTP {r.status_code if r else 'timeout'} (fallback)")
-                    time.sleep(REQUEST_DELAY)
-                    continue
-                data = r.json()
-            except Exception as e:
-                print(f" ❌ Fallback request failed ({type(e).__name__}): {e}")
-                time.sleep(REQUEST_DELAY)
-                continue
-
-        hits = data.get("hits", {}).get("hits", [])
-        print(f" Found {len(hits)} records")
-
-        for rec in hits:
-            try:
-                meta = rec.get("metadata", {}) or {}
-                title = meta.get("title", "Untitled")
-                desc = re.sub(r'<[^>]+>', '', meta.get("description", "") or "")
-
-                doi = meta.get("doi", rec.get("doi", ""))
-                pub_date = meta.get("publication_date", "")
-
-                lang = meta.get("language", "eng")
-
-                lic_obj = meta.get("license", {}) or {}
-                lic = lic_obj.get("id", "unknown") if isinstance(lic_obj, dict) else "unknown"
-
-                kws = ", ".join(meta.get("keywords", []) or [])
-
-                file_names = [f.get("key", "file") for f in rec.get("files", []) or []]
-                if not file_names:
-                    file_names = [f"{rec.get('id','record')}.zip"]
-
-                creators = [
-                    {"name": c.get("name", "Unknown"), "role": "AUTHOR"}
-                    for c in meta.get("creators", []) or []
-                ] or [{"name": "Unknown", "role": "AUTHOR"}]
-
-                links = rec.get("links", {}) or {}
-                url = links.get("self_html") or links.get("self") or f"https://zenodo.org/record/{rec.get('id','')}"
-
-                insert_project(
-                    conn,
-                    repo,
-                    term,
-                    title,
-                    desc,
-                    url,
-                    doi,
-                    pub_date,
-                    file_names,
-                    lic,
-                    kws,
-                    creators,
-                    lang,
-                )
-                total += 1
-                print(f" ✔ [{pub_date}] {title[:70]}")
-            except Exception as e:
-                print(f" ❌ Error parsing/inserting one record: {e}")
-
-        time.sleep(REQUEST_DELAY)
-
-    print(f"\n ✅ Zenodo total inserted: {total}")
-    return total
-
-# =====================================================================
-# DATAVERSE (dataverse.no فقط)
+# DATAVERSE (dataverse.no) — with duplicate-insert fix (seen_urls added)
 # =====================================================================
 def fetch_dataverse(conn, repo):
     base = repo["url"].rstrip('/') + "/api/search"
     total = 0
+    seen_urls = set()  # prevents duplicate inserts when multiple keywords match the same URL
 
     print(f"\n{'─'*60}")
     print(f"📦 DATAVERSE: {repo['name'].upper()}")
@@ -499,9 +426,12 @@ def fetch_dataverse(conn, repo):
             print(f" Found {len(items)} records")
 
             for item in items:
+                url = item.get("url", "")
+                if url and url in seen_urls:
+                    continue
+
                 title = item.get("name", "Untitled")
                 desc = item.get("description", "")
-                url = item.get("url", "")
                 pub_date = item.get("published_at", "")[:10]
                 global_id = item.get("global_id", "")
                 file_names = []
@@ -532,6 +462,8 @@ def fetch_dataverse(conn, repo):
                     conn, repo, term, title, desc, url, global_id,
                     pub_date, file_names, lic, kws, creators
                 )
+                if url:
+                    seen_urls.add(url)
 
                 total += 1
                 print(f" ✔ [{pub_date}] {title[:55]}")
@@ -544,7 +476,7 @@ def fetch_dataverse(conn, repo):
     return total
 
 # =====================================================================
-# ADA HTML
+# ADA HTML — with full license / authors / keywords extraction, 8 keywords
 # =====================================================================
 def is_challenge_page(html_or_text):
     low = (html_or_text or "").lower()
@@ -565,15 +497,15 @@ def wait_until_past_challenge(page, max_wait_s=CHALLENGE_MAX_WAIT_S):
             return True
 
         if not told_user:
-            print(" ⚠️ یک صفحه‌ی تایید ربات/کپچا نشون داده شده.")
-            print(" لطفاً توی پنجره‌ی مرورگر بازشده، تیک/چالش رو حل کنید.")
-            print(f" اسکریپت تا {max_wait_s} ثانیه صبر می‌کنه...")
+            print(" ⚠️ A bot/CAPTCHA verification page was shown.")
+            print(" Please solve the check/challenge in the opened browser window.")
+            print(f" The script will wait up to {max_wait_s} seconds...")
             told_user = True
 
         page.wait_for_timeout(CHALLENGE_POLL_S * 1000)
         waited += CHALLENGE_POLL_S
 
-    print(f" ❌ بعد از {max_wait_s} ثانیه، هنوز صفحه‌ی چالش باز بود.")
+    print(f" ❌ After {max_wait_s} seconds, the challenge page was still open.")
     return False
 
 def fetch_json(page, url):
@@ -647,6 +579,9 @@ def fetch_ada_html_and_insert(conn):
 
                 title = r["title"]
                 desc, pub_date, file_names = "", "", []
+                license_str = "unknown"
+                author_names = []
+                subject_list = []
 
                 if r["persistent_id"]:
                     api_url = (
@@ -657,24 +592,48 @@ def fetch_ada_html_and_insert(conn):
                     if fdata:
                         latest = fdata.get("data", {}).get("latestVersion", {})
                         meta = latest.get("metadataBlocks", {}).get("citation", {}).get("fields", [])
+
                         for f in meta:
-                            if f.get("typeName") == "dsDescription":
+                            tname = f.get("typeName")
+                            if tname == "dsDescription":
                                 try:
                                     desc = f["value"][0]["dsDescriptionValue"]["value"]
                                 except Exception:
                                     pass
+                            elif tname == "author":
+                                for entry in f.get("value", []) or []:
+                                    if isinstance(entry, dict):
+                                        aname = entry.get("authorName", {}).get("value")
+                                        if aname:
+                                            author_names.append(aname)
+                            elif tname == "subject":
+                                vals = f.get("value", []) or []
+                                if isinstance(vals, list):
+                                    subject_list.extend(str(v) for v in vals)
+
                         pub_date = (fdata.get("data", {}).get("publicationDate") or "")[:10]
+
                         for f in latest.get("files", []):
                             fname = f.get("dataFile", {}).get("filename", "")
                             if fname:
                                 file_names.append(fname)
 
+                        # license can be a string ("CC0") or a dict {"name":..,"uri":..}
+                        lic_raw = latest.get("license")
+                        if isinstance(lic_raw, dict):
+                            license_str = lic_raw.get("name") or lic_raw.get("uri") or "unknown"
+                        elif isinstance(lic_raw, str) and lic_raw and lic_raw.upper() != "NONE":
+                            license_str = lic_raw
+                        else:
+                            terms = latest.get("termsOfUse")
+                            license_str = terms[:150] if terms else "unknown"
+
                 if not file_names:
                     file_names = ["unknown_file"]
 
-                license_str = "unknown"
-                keywords = ""
-                creators = [{"name": "Unknown", "role": "AUTHOR"}]
+                creators = [{"name": a, "role": "AUTHOR"} for a in author_names] or \
+                           [{"name": "Unknown", "role": "AUTHOR"}]
+                keywords = ", ".join(subject_list)
                 doi = r.get("persistent_id", "")
 
                 try:
@@ -694,7 +653,7 @@ def fetch_ada_html_and_insert(conn):
                         "en",
                     )
                     grand_total += 1
-                    print(f" ✔ [{pub_date}] {title[:65]}")
+                    print(f" ✔ [{pub_date}] {title[:65]}  | license={license_str[:20]} | authors={len(author_names)} | kws={len(subject_list)}")
                 except Exception as e:
                     print(" ❌ insert failed:", e)
 
@@ -704,7 +663,8 @@ def fetch_ada_html_and_insert(conn):
     return grand_total
 
 # =====================================================================
-# UNI-HALLE HTML
+# UNI-HALLE HTML — extracts license / authors / keywords from standard
+# DSpace meta tags (citation_author, DC.rights, DC.subject)
 # =====================================================================
 def extract_uni_halle_items_from_html(html, base_url):
     soup = BeautifulSoup(html, "html.parser")
@@ -725,6 +685,17 @@ def extract_uni_halle_items_from_html(html, base_url):
             seen.add(item["url"])
             uniq.append(item)
     return uniq
+
+def _meta_contents(soup, *names):
+    """Returns the first non-empty group of meta tags among several
+    candidate names (different DSpace versions may use slightly
+    different field names)."""
+    for name in names:
+        tags = soup.find_all("meta", attrs={"name": name})
+        vals = [clean_text(t.get("content", "")) for t in tags if t.get("content")]
+        if vals:
+            return vals
+    return []
 
 def fetch_uni_halle_html_and_insert(conn):
     repo = REPO_UNI_HALLE
@@ -754,7 +725,7 @@ def fetch_uni_halle_html_and_insert(conn):
             return 0
         page.wait_for_timeout(1000)
         page.close()
-        print(" ✅ رد شدن از چالش اولیه انجام شد؛ حالا جستجوها اجرا می‌شن.\n")
+        print(" ✅ Initial challenge cleared; running the searches now.\n")
 
         for term in SEARCH_TERMS:
             search_url = repo["search_base"] + urllib.parse.quote(term)
@@ -794,6 +765,9 @@ def fetch_uni_halle_html_and_insert(conn):
 
                 desc, pubdate = "", ""
                 file_names = []
+                license_str = "unknown"
+                author_names = []
+                keyword_list = []
 
                 try:
                     dpage = context.new_page()
@@ -823,9 +797,19 @@ def fetch_uni_halle_html_and_insert(conn):
                         if clean_text(fa.get_text(strip=True))
                     ] or ["unknown_file"]
 
-                    license_str = "unknown"
-                    keywords = ""
-                    creators = [{"name": "Unknown", "role": "AUTHOR"}]
+                    author_names = _meta_contents(
+                        dsoup, "citation_author", "DC.contributor.author", "DC.creator"
+                    )
+
+                    rights_vals = _meta_contents(dsoup, "DC.rights", "dc.rights")
+                    if rights_vals:
+                        license_str = rights_vals[0][:150]
+
+                    keyword_list = _meta_contents(dsoup, "DC.subject", "citation_keywords")
+
+                    creators = [{"name": a, "role": "AUTHOR"} for a in author_names] or \
+                               [{"name": "Unknown", "role": "AUTHOR"}]
+                    keywords = ", ".join(keyword_list)
                     doi = ""
 
                     insert_project(
@@ -833,7 +817,7 @@ def fetch_uni_halle_html_and_insert(conn):
                         pubdate, file_names, license_str, keywords, creators
                     )
                     grand_total += 1
-                    print(f" ✔ {title[:70]}")
+                    print(f" ✔ {title[:60]}  | license={license_str[:20]} | authors={len(author_names)} | kws={len(keyword_list)}")
 
                     dpage.close()
                 except Exception as e:
@@ -845,225 +829,626 @@ def fetch_uni_halle_html_and_insert(conn):
     return grand_total
 
 # =====================================================================
-# EXCEL — طبق اسلاید ۲۸ (Part 2 Step 4c)
-# ستون‌های خواسته‌شده دقیقاً: repository_id, project_type, project_title,
-# primary_class, secondary_class, no_project_files
+# EXCEL — per Slide 28 (Part 2 Step 4c) + a polished summary sheet
 # =====================================================================
+NAVY_HEX = "1E2D41"
+LIGHT_HEX = "F5F7FA"
+ALT_HEX = "EFF3F7"
+WHITE = "FFFFFF"
+
+HEADER_FONT = Font(color=WHITE, bold=True, size=10.5, name="Calibri")
+HEADER_FILL = PatternFill("solid", fgColor=NAVY_HEX)
+TITLE_FONT = Font(bold=True, size=14, name="Calibri", color=NAVY_HEX)
+SUBTITLE_FONT = Font(italic=True, size=9.5, color="6E6E6E", name="Calibri")
+BODY_FONT = Font(size=10, name="Calibri")
+THIN = Side(style="thin", color="D8DCE1")
+CELL_BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
+
+
+def _style_table(ws, header_row, first_data_row, last_data_row, ncols, alt_fill=True):
+    for col in range(1, ncols + 1):
+        cell = ws.cell(row=header_row, column=col)
+        cell.font = HEADER_FONT
+        cell.fill = HEADER_FILL
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = CELL_BORDER
+    for row in range(first_data_row, last_data_row + 1):
+        is_alt = (row - first_data_row) % 2 == 0
+        for col in range(1, ncols + 1):
+            cell = ws.cell(row=row, column=col)
+            cell.font = BODY_FONT
+            cell.border = CELL_BORDER
+            cell.alignment = Alignment(vertical="center", wrap_text=False)
+            if alt_fill and is_alt:
+                cell.fill = PatternFill("solid", fgColor=ALT_HEX)
+
+
+def _autosize(ws, min_width=10, max_width=60):
+    for col_cells in ws.columns:
+        length = max((len(str(c.value)) for c in col_cells if c.value is not None), default=min_width)
+        letter = get_column_letter(col_cells[0].column)
+        ws.column_dimensions[letter].width = max(min_width, min(length + 3, max_width))
+
+
 def export_excel(db_path, out_path):
     conn = sqlite3.connect(db_path)
+
+    # ---- Sheet 1: exactly the columns required in Slide 28 (Step 4c) ----
     df = pd.read_sql_query('''
-    SELECT
-        P.repository_id,
-        P.type AS project_type,
-        P.title AS project_title,
-        P.primary_class,
-        COALESCE(P.secondary_class, "") AS secondary_class,
-        COUNT(F.id) AS no_project_files
-    FROM PROJECTS P
-    LEFT JOIN FILES F ON F.project_id = P.id
-    GROUP BY P.id
-    ORDER BY P.repository_id, P.type, P.title
+        SELECT
+            P.repository_id,
+            P.type AS project_type,
+            P.title AS project_title,
+            P.primary_class,
+            COALESCE(P.secondary_class, "") AS secondary_class,
+            COUNT(F.id) AS no_project_files
+        FROM PROJECTS P
+        LEFT JOIN FILES F ON F.project_id = P.id
+        GROUP BY P.id
+        ORDER BY P.repository_id, P.type, P.title
     ''', conn)
+
+    # ---- Sheet 2: a polished per-repository statistical summary ----
+    repo_df = pd.read_sql_query('''
+        SELECT DISTINCT repository_id, download_repository_folder AS repository_name
+        FROM PROJECTS ORDER BY repository_id
+    ''', conn)
+
+    summary_rows = []
+    for _, r in repo_df.iterrows():
+        rid = r["repository_id"]
+        c = conn.cursor()
+        c.execute("SELECT type, COUNT(*) FROM PROJECTS WHERE repository_id=? GROUP BY type", (rid,))
+        tc = dict(c.fetchall())
+        total = sum(tc.values())
+        c.execute("""SELECT primary_class, COUNT(*) cnt FROM PROJECTS
+                     WHERE repository_id=? GROUP BY primary_class ORDER BY cnt DESC LIMIT 1""", (rid,))
+        dom = c.fetchone()
+        dom_label = dom[0] if dom else "N/A"
+        dom_cnt = dom[1] if dom else 0
+        summary_rows.append({
+            "repository_id": rid,
+            "repository_name": r["repository_name"],
+            "total_projects": total,
+            "qda_project": tc.get("QDA_PROJECT", 0),
+            "qd_project": tc.get("QD_PROJECT", 0),
+            "other_project": tc.get("OTHER_PROJECT", 0),
+            "not_a_project": tc.get("NOT_A_PROJECT", 0),
+            "dominant_class": dom_label,
+            "dominant_class_share": f"{(dom_cnt/total*100):.1f}%" if total else "0%",
+        })
+    summary_df = pd.DataFrame(summary_rows)
+
     conn.close()
 
-    with pd.ExcelWriter(out_path, engine='openpyxl') as w:
-        df.to_excel(w, index=False, sheet_name="Classifications")
-        ws = w.sheets["Classifications"]
-        for col in ws.columns:
-            ws.column_dimensions[col[0].column_letter].width = max(
-                len(str(col[0].value)) + 2,
-                max((len(str(c.value)) for c in col if c.value), default=10)
-            )
-    print(f"\n📊 Excel Generated successfully -> {out_path} ({len(df)} rows) [Slide 28 Aligned]")
-    return df
+    with pd.ExcelWriter(out_path, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name="Classifications", startrow=0)
+        summary_df.to_excel(writer, index=False, sheet_name="Repository Summary", startrow=3)
+
+        # ---- Style the main sheet (Classifications) ----
+        ws1 = writer.sheets["Classifications"]
+        _style_table(ws1, header_row=1, first_data_row=2, last_data_row=len(df) + 1, ncols=len(df.columns))
+        ws1.freeze_panes = "A2"
+        ws1.auto_filter.ref = ws1.dimensions
+        _autosize(ws1)
+        ws1.row_dimensions[1].height = 26
+
+        # ---- Style the summary sheet (Repository Summary) with a title ----
+        ws2 = writer.sheets["Repository Summary"]
+        ws2["A1"] = "SQ26 - Repository Summary"
+        ws2["A1"].font = TITLE_FONT
+        ws2["A2"] = f"{STUDENT_NAME}  |  Student ID: {STUDENT_ID}  |  " \
+                    f"{summary_df['total_projects'].sum()} projects across {len(summary_df)} repositories"
+        ws2["A2"].font = SUBTITLE_FONT
+
+        header_row2 = 4
+        first_data2 = 5
+        last_data2 = 4 + len(summary_df)
+        _style_table(ws2, header_row=header_row2, first_data_row=first_data2,
+                     last_data_row=last_data2, ncols=len(summary_df.columns))
+        ws2.freeze_panes = f"A{first_data2}"
+        ws2.auto_filter.ref = f"A{header_row2}:{get_column_letter(len(summary_df.columns))}{last_data2}"
+        _autosize(ws2)
+        ws2.row_dimensions[header_row2].height = 22
+
+        # highlight dominant-class share >= 50% in green for visual emphasis
+        dom_share_col = list(summary_df.columns).index("dominant_class_share") + 1
+        green_fill = PatternFill("solid", fgColor="E3F6E8")
+        for row in range(first_data2, last_data2 + 1):
+            cell = ws2.cell(row=row, column=dom_share_col)
+            try:
+                val = float(str(cell.value).rstrip('%'))
+                if val >= 50:
+                    cell.fill = green_fill
+                    cell.font = Font(bold=True, size=10, color="1E7A34")
+            except (ValueError, TypeError):
+                pass
+
+    print(f"📊 Excel Generated successfully -> {out_path} "
+          f"(Classifications: {len(df)} rows, Summary: {len(summary_df)} repos) [Slide 28 Aligned]")
+    return df, summary_df
 
 # =====================================================================
-# نمودار برداری خالص (بدون هیچ PNG/رستر) — طبق اسلاید ۳۰
+# PDF — professional design, aligned with Slide 30 (Part 2 Step 4d)
+# uses a readable horizontal bar chart (no rotated text)
 # =====================================================================
-def draw_vector_histogram(pdf, fn, class_counts, chart_width=190):
+NAVY = (30, 45, 65)
+SLATE = (52, 73, 94)
+ACCENT = (41, 128, 185)
+LIGHT_BG = (245, 247, 250)
+ROW_ALT = (240, 244, 248)
+GREY_TEXT = (110, 110, 110)
+
+TYPE_COLORS = {
+    "QDA_PROJECT": (39, 174, 96),
+    "QD_PROJECT": (41, 128, 185),
+    "OTHER_PROJECT": (243, 156, 18),
+    "NOT_A_PROJECT": (149, 165, 166),
+}
+
+
+class Report(FPDF):
+    """Custom PDF class with a consistent header/footer on every page
+    (except the cover)."""
+    def __init__(self):
+        super().__init__()
+        self.fn = "Helvetica"
+        self.suppress_header_footer = False
+        self.total_pages_hint = None
+
+    def header(self):
+        if self.page_no() == 1 or self.suppress_header_footer:
+            return
+        self.set_font(self.fn, '', 8)
+        self.set_text_color(*GREY_TEXT)
+        self.cell(0, 6, "SQ26 - Qualitative Data Repository Classification Report", align='L')
+        self.set_x(-60)
+        self.cell(50, 6, f"Student ID: {STUDENT_ID}", align='R',
+                  new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        self.set_draw_color(210, 214, 220)
+        self.set_line_width(0.2)
+        self.line(10, 16, 200, 16)
+        self.set_text_color(0, 0, 0)
+        self.set_y(20)
+
+    def footer(self):
+        if self.page_no() == 1 or self.suppress_header_footer:
+            return
+        self.set_y(-15)
+        self.set_draw_color(210, 214, 220)
+        self.line(10, self.get_y(), 200, self.get_y())
+        self.set_font(self.fn, '', 8)
+        self.set_text_color(*GREY_TEXT)
+        if self.total_pages_hint:
+            self.cell(0, 10, f"Page {self.page_no()} of {self.total_pages_hint}", align='C')
+        else:
+            self.cell(0, 10, f"Page {self.page_no()}", align='C')
+        self.set_text_color(0, 0, 0)
+
+
+def ensure_space(pdf, needed_height):
+    """If there isn't enough room left on the current page, start a new
+    one — this prevents a block (like the Comments box) from being
+    split across pages and leaving ugly blank space."""
+    if pdf.get_y() + needed_height > pdf.h - pdf.b_margin:
+        pdf.add_page()
+
+
+def draw_horizontal_histogram(pdf, fn, class_counts, total_r, chart_width=190):
     """
-    "Histogram of primary classes identified" را کاملاً با ابزارهای برداری
-    خود FPDF (rect / line / متن چرخش‌یافته) رسم می‌کند — بدون تولید هیچ
-    فایل PNG میانی — تا PDF نهایی واقعاً برداری و قابل زوم بدون افت
-    کیفیت باشد (طبق اسلاید ۳۰: "use vector graphics ... so that one can
-    zoom in"). اسم کامل هر کلاس (بدون بریدن/سه‌نقطه) به‌عنوان لیبل محور
-    استفاده می‌شود ("use the full class name as the bin name") و عدد
-    شمارش دقیقاً بالای هر ستون چاپ می‌شود ("count as a number on top of
-    the visualizing bar").
+    Fully vector, readable histogram:
+    - Full class name shown horizontally in normal (non-rotated) text on the left
+    - Bar on the right, proportional to the count
+    - Bold, high-contrast count + percentage at the end of the bar
     """
     items = sorted(class_counts.items(), key=lambda x: x[1], reverse=True)
     if not items:
         return
-    n = len(items)
     max_count = max(c for _, c in items) or 1
-    max_label_len = max(len(c) for c, _ in items)
-
-    # اندازه‌ی فونت لیبل بر اساس طول طولانی‌ترین اسم کامل کلاس تنظیم می‌شود
-    label_font = 6.5
-    if max_label_len > 55:
-        label_font = 5.5
-    if max_label_len > 75:
-        label_font = 5.0
-
-    char_w_mm = 0.5 * label_font * 0.352778
-    label_room = max_label_len * char_w_mm + 10  # فضای عمودی لازم برای لیبل‌های چرخیده
-
-    bar_area_height = 60
-    top_gap = 9
-    total_block_height = top_gap + bar_area_height + label_room + 6
-
-    # اگر جای کافی روی صفحه‌ی فعلی نیست، برو صفحه‌ی جدید
-    if pdf.get_y() + total_block_height > pdf.h - pdf.b_margin:
-        pdf.add_page()
+    label_font = 8.5
+    row_h = 12
+    bar_h = 6.5
 
     pdf.set_font(fn, 'B', 11)
+    pdf.set_text_color(*NAVY)
     pdf.cell(0, 8, "Histogram of Primary Classes Identified",
               new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(2)
 
     x0 = pdf.l_margin
-    top_y = pdf.get_y() + top_gap
-    baseline_y = top_y + bar_area_height
+    label_w = 78
+    bar_area_w = chart_width - label_w - 30
 
-    bar_gap = 2.5
-    bar_width = (chart_width - (n - 1) * bar_gap) / n
-    bar_width = max(3, min(bar_width, 14))
-    total_width = n * bar_width + (n - 1) * bar_gap
-    x_start = x0 + max(0, (chart_width - total_width) / 2)
+    for cls_name, cnt in items:
+        ensure_space(pdf, row_h + 4)
+        y = pdf.get_y()
 
-    # محور پایه (خط افقی صفر)
-    pdf.set_draw_color(120, 120, 120)
-    pdf.set_line_width(0.25)
-    pdf.line(x0, baseline_y, x0 + chart_width, baseline_y)
-
-    for i, (cls_name, cnt) in enumerate(items):
-        bar_h = (cnt / max_count) * (bar_area_height - 6)
-        bx = x_start + i * (bar_width + bar_gap)
-        by = baseline_y - bar_h
-
-        # ستون میله‌ای (برداری - rect واقعی PDF، نه تصویر)
-        pdf.set_fill_color(44, 62, 80)
-        pdf.set_draw_color(52, 73, 94)
-        pdf.rect(bx, by, bar_width, max(bar_h, 0.3), style='FD')
-
-        # عدد شمارش، دقیقاً بالای ستون
-        pdf.set_font(fn, 'B', 7)
-        pdf.set_xy(bx - 6, by - 5)
-        pdf.cell(bar_width + 12, 4.5, str(cnt), align='C')
-
-        # اسم کامل کلاس، چرخیده ۹۰ درجه، زیر محور (بدون هیچ کوتاه‌سازی)
-        label_anchor_x = bx + bar_width / 2 + 1.5
-        label_anchor_y = baseline_y + 1.5
+        pdf.set_xy(x0, y)
         pdf.set_font(fn, '', label_font)
-        with pdf.rotation(90, x=label_anchor_x, y=label_anchor_y):
-            pdf.set_xy(label_anchor_x, label_anchor_y)
-            pdf.cell(95, 3, cls_name, align='L')
+        pdf.set_text_color(20, 20, 20)
+        pdf.multi_cell(label_w - 2, 4.2, cls_name, align='L')
+        label_bottom_y = pdf.get_y()
 
-    pdf.set_y(baseline_y + label_room + 4)
+        bar_y = y + (row_h - bar_h) / 2
+        bar_w = (cnt / max_count) * bar_area_w
 
-def generate_pdf(db_path, pdf_path, base_dir):
+        pdf.set_fill_color(*NAVY)
+        pdf.set_draw_color(*SLATE)
+        pdf.rect(x0 + label_w, bar_y, max(bar_w, 1.2), bar_h, style='FD')
+
+        pct = cnt / total_r * 100 if total_r else 0
+        pdf.set_xy(x0 + label_w + bar_w + 2, bar_y - 0.8)
+        pdf.set_font(fn, 'B', 8.5)
+        pdf.set_text_color(*NAVY)
+        pdf.cell(28, bar_h + 1.6, f"{cnt} ({pct:.0f}%)", align='L')
+        pdf.set_text_color(0, 0, 0)
+
+        next_y = max(label_bottom_y, bar_y + bar_h) + 3
+        pdf.set_y(next_y)
+
+    pdf.ln(2)
+
+
+def stat_card_row(pdf, fn, stats):
+    """Summary stat card row (Total / QDA / QD / OTHER / NOT_A)."""
+    labels = ["Total", "QDA_PROJECT", "QD_PROJECT", "OTHER_PROJECT", "NOT_A_PROJECT"]
+    values = [stats.get(l, 0) if l != "Total" else stats["Total"] for l in labels]
+
+    n = len(labels)
+    gap = 3
+    card_w = (190 - (n - 1) * gap) / n
+    card_h = 20
+    x0 = pdf.l_margin
+    y0 = pdf.get_y()
+
+    for i, (label, val) in enumerate(zip(labels, values)):
+        cx = x0 + i * (card_w + gap)
+        accent = TYPE_COLORS.get(label, ACCENT) if label != "Total" else NAVY
+
+        pdf.set_fill_color(*LIGHT_BG)
+        pdf.set_draw_color(220, 224, 230)
+        pdf.rect(cx, y0, card_w, card_h, style='FD')
+        pdf.set_fill_color(*accent)
+        pdf.rect(cx, y0, card_w, 1.4, style='F')
+
+        pdf.set_xy(cx, y0 + 4)
+        pdf.set_font(fn, 'B', 14)
+        pdf.set_text_color(*NAVY)
+        pdf.cell(card_w, 7, str(val), align='C')
+
+        pdf.set_xy(cx, y0 + 13)
+        pdf.set_font(fn, '', 6.5)
+        pdf.set_text_color(*GREY_TEXT)
+        pdf.cell(card_w, 5, label, align='C')
+
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_y(y0 + card_h + 7)
+
+
+def draw_overall_type_bar(pdf, fn, totals, chart_width=190):
+    """Compact vector chart used only on the Executive Overview page:
+    overall project-type distribution (QDA/QD/OTHER/NOT_A) across all
+    repositories combined."""
+    labels = ["QDA_PROJECT", "QD_PROJECT", "OTHER_PROJECT", "NOT_A_PROJECT"]
+    values = [totals.get(l, 0) for l in labels]
+    grand = sum(values) or 1
+    max_v = max(values) or 1
+
+    bar_h = 9
+    gap = 6
+    label_w = 42
+    y = pdf.get_y()
+    for label, val in zip(labels, values):
+        pdf.set_font(fn, '', 8.5)
+        pdf.set_text_color(0, 0, 0)
+        pdf.set_xy(pdf.l_margin, y)
+        pdf.cell(label_w, bar_h, label, align='L')
+
+        bar_w = (val / max_v) * (chart_width - label_w - 28)
+        pdf.set_fill_color(*TYPE_COLORS.get(label, ACCENT))
+        pdf.rect(pdf.l_margin + label_w, y + 1.5, max(bar_w, 0.5), bar_h - 3, style='F')
+
+        pct = val / grand * 100
+        pdf.set_xy(pdf.l_margin + label_w + bar_w + 2, y)
+        pdf.set_font(fn, 'B', 8.5)
+        pdf.cell(26, bar_h, f"{val} ({pct:.0f}%)", align='L')
+
+        y += bar_h + gap
+    pdf.set_y(y)
+
+
+def _render_repo_section(pdf, fn, c, repo_id, repo_folder):
+    """Renders one full repository section: colored title band, stat
+    cards, histogram, table, and comment box."""
+    pdf.set_fill_color(*NAVY)
+    pdf.rect(10, pdf.get_y(), 190, 14, style='F')
+    pdf.set_xy(14, pdf.get_y() + 3)
+    pdf.set_font(fn, 'B', 14)
+    pdf.set_text_color(255, 255, 255)
+    pdf.cell(0, 8, f"Repository {repo_id}: {repo_folder.upper()}")
+    pdf.set_text_color(0, 0, 0)
+    pdf.set_y(pdf.get_y() + 20)
+
+    c.execute("SELECT type, COUNT(*) FROM PROJECTS WHERE repository_id=? GROUP BY type", (repo_id,))
+    type_counts = dict(c.fetchall())
+    stats = {
+        "Total": sum(type_counts.values()),
+        "QDA_PROJECT": type_counts.get("QDA_PROJECT", 0),
+        "QD_PROJECT": type_counts.get("QD_PROJECT", 0),
+        "OTHER_PROJECT": type_counts.get("OTHER_PROJECT", 0),
+        "NOT_A_PROJECT": type_counts.get("NOT_A_PROJECT", 0),
+    }
+    stat_card_row(pdf, fn, stats)
+
+    c.execute("""SELECT primary_class, COUNT(*) cnt FROM PROJECTS
+                 WHERE repository_id=? GROUP BY primary_class ORDER BY cnt DESC""",
+              (repo_id,))
+    rows = c.fetchall()
+    if not rows:
+        pdf.set_font(fn, '', 10)
+        pdf.cell(0, 6, "No classified projects for this repository.",
+                  new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        return
+
+    class_counts = dict(rows)
+    dominant, dominant_cnt = rows[0]
+    total_r = stats["Total"]
+
+    draw_horizontal_histogram(pdf, fn, class_counts, total_r)
+    pdf.ln(4)
+
+    ensure_space(pdf, 20)
+    pdf.set_font(fn, 'B', 11)
+    pdf.set_text_color(*NAVY)
+    pdf.cell(0, 8, "Top 20 Identified Classes (Rank-Ordered)",
+              new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(2)
+
+    pdf.set_fill_color(*NAVY)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font(fn, 'B', 9)
+    pdf.cell(130, 7.5, "  Class Name", border=0, fill=True)
+    pdf.cell(30, 7.5, "Count", border=0, fill=True, align='C')
+    pdf.cell(30, 7.5, "Share", border=0, fill=True, align='C',
+              new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_text_color(0, 0, 0)
+
+    pdf.set_font(fn, '', 8.5)
+    for idx, (cls_name, cnt) in enumerate(rows[:20]):
+        if pdf.get_y() + 6.5 > pdf.h - pdf.b_margin:
+            pdf.add_page()
+        fill = ROW_ALT if idx % 2 == 0 else (255, 255, 255)
+        pct = cnt / total_r * 100 if total_r else 0
+        pdf.set_fill_color(*fill)
+        pdf.cell(130, 6.5, f"  {cls_name}", border=0, fill=True)
+        pdf.cell(30, 6.5, str(cnt), border=0, fill=True, align='C')
+        pdf.cell(30, 6.5, f"{pct:.1f}%", border=0, fill=True, align='C',
+                  new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_draw_color(200, 204, 210)
+    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+    pdf.ln(6)
+
+    comment_text = (
+        f"The '{repo_folder.upper()}' repository contributed {total_r} classified projects. "
+        f"The dominant classification was '{dominant}', accounting for {dominant_cnt} of {total_r} "
+        f"projects ({dominant_cnt/total_r*100:.1f}%). Classification follows the ISIC Rev.5 taxonomy "
+        f"at two hierarchical levels (Section and Division), derived from project metadata and file "
+        f"extensions collected via the live repository API/HTML interfaces."
+    )
+    pdf.set_font(fn, 'I', 9)
+    lines_needed = pdf.multi_cell(170, 5, comment_text, dry_run=True, output="LINES")
+    box_h = len(lines_needed) * 5 + 10
+
+    # key bug fix: check for enough room before drawing the box, so the
+    # header + text stay together on one page (avoids leaving ugly blank
+    # space at the bottom of the previous page)
+    ensure_space(pdf, box_h + 8)
+
+    box_y = pdf.get_y()
+    pdf.set_fill_color(*LIGHT_BG)
+    pdf.set_draw_color(220, 224, 230)
+    pdf.rect(10, box_y, 190, box_h, style='FD')
+
+    pdf.set_xy(14, box_y + 3)
+    pdf.set_font(fn, 'B', 9)
+    pdf.set_text_color(*NAVY)
+    pdf.cell(0, 5, "Comments on Findings", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_text_color(0, 0, 0)
+
+    pdf.set_xy(14, pdf.get_y())
+    pdf.set_font(fn, 'I', 9)
+    pdf.multi_cell(180, 5, comment_text)
+    pdf.set_y(box_y + box_h + 8)
+
+
+def generate_pdf(db_path, pdf_path):
     """
-    تولید گزارش PDF کاملاً منطبق بر اسلاید ۳۰ (Part 2 Step 4d):
-    برای هر Repository:
-    ۱. هیستوگرام برداری (نه PNG) با اسم کامل کلاس‌ها و عدد بالای هر ستون
-    ۲. جدول رتبه‌بندی‌شده‌ی حداکثر ۲۰ کلاس برتر با شمارش هرکدام
-    ۳. بخش "Comments on Findings"
-    و ادامه با مخزن بعدی
+    PDF report aligned with Slide 30 (Part 2 Step 4d):
+    cover -> table of contents -> executive overview -> for each
+    repository (stat cards + horizontal histogram + Top-20 table +
+    comments).
     """
     conn = sqlite3.connect(db_path)
     c = conn.cursor()
-
-    pdf = FPDF()
-    pdf.set_auto_page_break(auto=True, margin=20)
     fn = "Helvetica"
 
-    c.execute('SELECT DISTINCT repository_id, download_repository_folder FROM PROJECTS ORDER BY repository_id')
+    c.execute("SELECT COUNT(*) FROM PROJECTS")
+    grand_total = c.fetchone()[0]
+    c.execute("SELECT COUNT(DISTINCT repository_id) FROM PROJECTS")
+    n_repos = c.fetchone()[0]
+    c.execute("SELECT DISTINCT repository_id, download_repository_folder FROM PROJECTS ORDER BY repository_id")
     repos = c.fetchall()
 
+    c.execute("SELECT type, COUNT(*) FROM PROJECTS GROUP BY type")
+    overall_type_totals = dict(c.fetchall())
+
+    # ---- Pass 1: measure the starting page number of each section
+    # (needed for the table of contents) ----
+    measure_pdf = Report()
+    measure_pdf.suppress_header_footer = True
+    measure_pdf.set_auto_page_break(auto=True, margin=20)
+    measure_pdf.add_page()  # dummy cover page
+    section_start_pages = {}
+    for repo_id, repo_folder in repos:
+        measure_pdf.add_page()
+        section_start_pages[repo_id] = measure_pdf.page_no()
+        _render_repo_section(measure_pdf, fn, c, repo_id, repo_folder)
+    repo_pages_count = measure_pdf.page_no() - 1  # minus the dummy cover page
+
+    # final page count = cover + TOC + executive overview + repo pages
+    total_pages_final = 1 + 1 + 1 + repo_pages_count
+
+    # ---- Pass 2: build the final document ----
+    pdf = Report()
+    pdf.total_pages_hint = total_pages_final
+    pdf.set_auto_page_break(auto=True, margin=20)
+
+    # ---- Cover page ----
+    pdf.add_page()
+    pdf.set_y(62)
+    pdf.set_font(fn, 'B', 24)
+    pdf.set_text_color(*NAVY)
+    pdf.multi_cell(0, 12, "SQ26 - Qualitative Data\nRepository Classification Report", align='C')
+    pdf.ln(4)
+    pdf.set_font(fn, '', 12)
+    pdf.set_text_color(*GREY_TEXT)
+    pdf.cell(0, 8, "Part 2: Project Classification by Economic Sector (ISIC Rev.5)",
+             align='C', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.ln(14)
+
+    pdf.set_draw_color(*ACCENT)
+    pdf.set_line_width(0.6)
+    pdf.line(75, pdf.get_y(), 135, pdf.get_y())
+    pdf.ln(10)
+
+    pdf.set_font(fn, '', 11)
+    pdf.set_text_color(0, 0, 0)
+    for line in [
+        f"Name: {STUDENT_NAME}",
+        f"Student ID: {STUDENT_ID}",
+        "University: FAU Erlangen-Nurnberg",
+        "Supervisor: Prof. Dirk Riehle",
+        f"Date: {datetime.now():%B %Y}",
+    ]:
+        pdf.cell(0, 7, line, align='C', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+
+    pdf.ln(10)
+    pdf.set_font(fn, 'I', 10.5)
+    pdf.set_text_color(*GREY_TEXT)
+    pdf.multi_cell(0, 6,
+        f"{grand_total:,} research dataset projects classified across {n_repos} "
+        f"repositories, using the ISIC Rev.5 (UN 2025) two-level (Section + Division) "
+        f"classification taxonomy.",
+        align='C')
+    pdf.set_text_color(0, 0, 0)
+
+    # ---- Table of contents ----
+    pdf.add_page()
+    pdf.set_font(fn, 'B', 16)
+    pdf.set_text_color(*NAVY)
+    pdf.cell(0, 12, "Table of Contents", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(4)
+
+    pdf.set_font(fn, '', 11)
+    pdf.cell(150, 8, "Executive Overview")
+    pdf.cell(30, 8, "page 3", align='R', new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_draw_color(225, 228, 232)
+    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+
+    for repo_id, repo_folder in repos:
+        page_no = section_start_pages[repo_id] + 2  # +1 cover, +1 TOC/overview shift
+        pdf.set_font(fn, '', 11)
+        pdf.cell(150, 8, f"Repository {repo_id}: {repo_folder}")
+        pdf.cell(30, 8, f"page {page_no}", align='R',
+                  new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+        pdf.set_draw_color(225, 228, 232)
+        pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+
+    # ---- Executive Overview page ----
+    pdf.add_page()
+    pdf.set_font(fn, 'B', 16)
+    pdf.set_text_color(*NAVY)
+    pdf.cell(0, 12, "Executive Overview", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(2)
+
+    pdf.set_font(fn, '', 10)
+    pdf.multi_cell(0, 5.5,
+        f"This report summarizes the classification of {grand_total:,} research dataset "
+        f"projects collected from {n_repos} repositories. Each project was assigned a "
+        f"PROJECT_TYPE (QDA_PROJECT, QD_PROJECT, OTHER_PROJECT, or NOT_A_PROJECT) based on "
+        f"its file composition, and classified against the ISIC Rev.5 taxonomy at the Section "
+        f"and Division level. The following pages present per-repository breakdowns.")
+    pdf.ln(6)
+
+    pdf.set_font(fn, 'B', 12)
+    pdf.set_text_color(*NAVY)
+    pdf.cell(0, 8, "Overall Project Type Distribution", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(2)
+    draw_overall_type_bar(pdf, fn, overall_type_totals)
+    pdf.ln(8)
+
+    pdf.set_font(fn, 'B', 12)
+    pdf.set_text_color(*NAVY)
+    pdf.cell(0, 8, "Repository Summary", new_x=XPos.LMARGIN, new_y=YPos.NEXT)
+    pdf.set_text_color(0, 0, 0)
+    pdf.ln(2)
+
+    pdf.set_fill_color(*NAVY)
+    pdf.set_text_color(255, 255, 255)
+    pdf.set_font(fn, 'B', 8.5)
+    widths = [42, 16, 16, 16, 16, 16, 68]
+    headers = ["Repository", "Total", "QDA", "QD", "OTHER", "N/A", "Dominant Class"]
+    for w, h in zip(widths, headers):
+        pdf.cell(w, 7.5, h, border=0, fill=True, align='C')
+    pdf.ln()
+    pdf.set_text_color(0, 0, 0)
+
+    pdf.set_font(fn, '', 8)
+    for idx, (repo_id, repo_folder) in enumerate(repos):
+        c.execute("SELECT type, COUNT(*) FROM PROJECTS WHERE repository_id=? GROUP BY type", (repo_id,))
+        tc = dict(c.fetchall())
+        tot = sum(tc.values())
+        c.execute("""SELECT primary_class, COUNT(*) cnt FROM PROJECTS
+                     WHERE repository_id=? GROUP BY primary_class ORDER BY cnt DESC LIMIT 1""",
+                  (repo_id,))
+        dom = c.fetchone()
+        dom_label = dom[0] if dom else "N/A"
+
+        fill = ROW_ALT if idx % 2 == 0 else (255, 255, 255)
+        pdf.set_fill_color(*fill)
+        pdf.cell(widths[0], 6.5, f"{repo_id}: {repo_folder}", border=0, fill=True)
+        pdf.cell(widths[1], 6.5, str(tot), border=0, fill=True, align='C')
+        pdf.cell(widths[2], 6.5, str(tc.get("QDA_PROJECT", 0)), border=0, fill=True, align='C')
+        pdf.cell(widths[3], 6.5, str(tc.get("QD_PROJECT", 0)), border=0, fill=True, align='C')
+        pdf.cell(widths[4], 6.5, str(tc.get("OTHER_PROJECT", 0)), border=0, fill=True, align='C')
+        pdf.cell(widths[5], 6.5, str(tc.get("NOT_A_PROJECT", 0)), border=0, fill=True, align='C')
+        pdf.cell(widths[6], 6.5, dom_label[:44], border=0, fill=True)
+        pdf.ln()
+
+    pdf.set_draw_color(200, 204, 210)
+    pdf.line(10, pdf.get_y(), 200, pdf.get_y())
+
+    # ---- Per-repository sections ----
     for repo_id, repo_folder in repos:
         pdf.add_page()
-
-        pdf.set_font(fn, 'B', 14)
-        pdf.cell(
-            0, 10,
-            f"Repository: {repo_folder.upper()} (ID: {repo_id})",
-            new_x=XPos.LMARGIN, new_y=YPos.NEXT
-        )
-        pdf.ln(5)
-
-        c.execute('''
-        SELECT primary_class, COUNT(*) AS cnt
-        FROM PROJECTS
-        WHERE repository_id = ?
-        GROUP BY primary_class
-        ORDER BY cnt DESC
-        ''', (repo_id,))
-        rows = c.fetchall()
-        if not rows:
-            pdf.set_font(fn, '', 10)
-            pdf.cell(
-                0, 6,
-                "No classified projects for this repository.",
-                new_x=XPos.LMARGIN, new_y=YPos.NEXT
-            )
-            continue
-
-        classes = [r[0] for r in rows]
-        counts = [r[1] for r in rows]
-        dominant = classes[0]
-        class_counts = dict(rows)
-
-        # ۱. هیستوگرام کاملاً برداری (اسلاید ۳۰)
-        draw_vector_histogram(pdf, fn, class_counts)
-        pdf.ln(6)
-
-        # ۲. جدول رتبه‌بندی‌شده‌ی حداکثر ۲۰ کلاس برتر با اسم کامل کلاس
-        pdf.set_font(fn, 'B', 11)
-        pdf.cell(
-            0, 8,
-            "Top 20 Identified Classes (Rank-Ordered):",
-            new_x=XPos.LMARGIN, new_y=YPos.NEXT
-        )
-        pdf.ln(2)
-
-        pdf.set_font(fn, 'B', 9)
-        pdf.cell(150, 7, "Class Name", border=1)
-        pdf.cell(30, 7, "Project Count", border=1, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-
-        pdf.set_font(fn, '', 8.5)
-        for (cls_name, cnt) in rows[:20]:
-            pdf.cell(150, 6, cls_name, border=1)
-            pdf.cell(30, 6, str(cnt), border=1, new_x=XPos.LMARGIN, new_y=YPos.NEXT)
-        pdf.ln(6)
-
-        # ۳. بخش نظرات و تحلیلی (Comments on Findings)
-        total_r = sum(counts)
-        pdf.set_font(fn, 'B', 10)
-        pdf.cell(
-            0, 6,
-            "Comments on Findings:",
-            new_x=XPos.LMARGIN, new_y=YPos.NEXT
-        )
-        pdf.set_font(fn, 'I', 9.5)
-        pdf.multi_cell(
-            0, 5,
-            f"The data acquisition pipeline successfully analyzed {total_r} projects within "
-            f"the '{repo_folder.upper()}' repository. The primary classified theme was dominated by "
-            f"'{dominant}', with a volume of {counts[0]} dataset classifications. This structural mapping "
-            f"directly correlates with the empirical metadata patterns parsed from live HTML templates and API "
-            f"responses in accordance with ISIC Rev.5 taxonomic mapping guidelines."
-        )
-        pdf.ln(8)
+        _render_repo_section(pdf, fn, c, repo_id, repo_folder)
 
     pdf.output(pdf_path)
     conn.close()
-    print(f"📄 PDF Report Generated successfully -> {pdf_path} [Slide 30 Aligned - Vector Graphics]")
+    print(f"📄 PDF Report Generated successfully -> {pdf_path} "
+          f"(total pages: {pdf.page_no()}) [Slide 30 Aligned - Vector Graphics]")
 
 # =====================================================================
 # MAIN
 # =====================================================================
 if __name__ == "__main__":
     print("\n" + "="*65)
-    print(f" SQ26 PHASE 2 - REAL DATA COLLECTOR | Student: {STUDENT_ID}")
+    print(f" SQ26 PHASE 2 - REAL DATA COLLECTOR | Student: {STUDENT_NAME} ({STUDENT_ID})")
     print("="*65)
 
     base_dir = resolve_output_dir()
@@ -1076,7 +1461,6 @@ if __name__ == "__main__":
 
     grand_total = 0
 
-    grand_total += fetch_zenodo(conn)
     grand_total += fetch_dataverse(conn, REPO_DATAVERSE_NO)
     grand_total += fetch_ada_html_and_insert(conn)
 
@@ -1090,7 +1474,7 @@ if __name__ == "__main__":
     print(f"{'='*65}")
 
     export_excel(db_path, excel_path)
-    generate_pdf(db_path, pdf_path, base_dir)
+    generate_pdf(db_path, pdf_path)
 
     print(f"""
 ╔{'═'*63}╗
